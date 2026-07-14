@@ -1,0 +1,28 @@
+{
+  "category": "policy",
+  "detected_at": "2026-07-14T10:00:00Z",
+  "evidence": {
+    "redacted": true,
+    "references": [
+      "https://github.com/AtlasReaper311/example-repository/actions/runs/100"
+    ],
+    "summary": "A deterministic fixture finding requires remediation."
+  },
+  "fingerprint": "sha256:1bd5fc6c0b0a827c26e564ce24484339e52eb0f6f4ecb5080ae8791318b32922",
+  "location": ".github/workflows/ci.yml:10",
+  "remediation": {
+    "eligible": true,
+    "reason": "An allowlisted deterministic fixer is available."
+  },
+  "rule_id": "workflow-timeout",
+  "schema_version": "atlas-control-plane/finding/v1",
+  "severity": "warning",
+  "source": {
+    "check_id": "workflow-timeout",
+    "producer": "atlas-dep-audit",
+    "producer_version": "1.0.0"
+  },
+  "subject": {
+    "repository": "AtlasReaper311/example-repository"
+  }
+}

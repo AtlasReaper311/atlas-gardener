@@ -1,0 +1,9 @@
+name: Fixture CI
+
+on: [push]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python3 -m unittest
