@@ -17,6 +17,7 @@ from atlas_gardener.contracts import (
     write_json,
 )
 from atlas_gardener.engine import apply_proposal, propose, scan
+from atlas_gardener.dependabot_rollout import execute_rollout
 from atlas_gardener.errors import GardenerError
 from atlas_gardener.fixers import RULE_FIXERS
 from atlas_gardener.safety import MAX_CHANGED_FILES, MAX_CHANGED_LINES
@@ -69,6 +70,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-local-target",
         action="store_true",
         help="explicitly allow a clean, non-main real local branch",
+    )
+
+    rollout_parser = commands.add_parser(
+        "dependabot-rollout",
+        help="review or open draft PRs from an approved Dependabot plan",
+    )
+    rollout_parser.add_argument("--plan", required=True, type=_path)
+    rollout_parser.add_argument("--plan-root", required=True, type=_path)
+    rollout_parser.add_argument("--estate-root", required=True, type=_path)
+    rollout_parser.add_argument("--approved-plan-digest")
+    rollout_mode = rollout_parser.add_mutually_exclusive_group()
+    rollout_mode.add_argument(
+        "--dry-run", action="store_true", help="show diffs only; this is the default"
+    )
+    rollout_mode.add_argument(
+        "--apply", action="store_true", help="confirm, push, and open draft PRs"
     )
 
     doctor_parser = commands.add_parser("doctor", help="verify local prerequisites")
@@ -134,6 +151,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 apply=args.apply,
                 allow_local_target=args.allow_local_target,
                 pins_file=args.pins_file,
+            )
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))
+            return 0
+        if args.command == "dependabot-rollout":
+            if args.apply and not args.approved_plan_digest:
+                raise GardenerError("--apply requires --approved-plan-digest")
+            result = execute_rollout(
+                plan_path=args.plan.resolve(strict=True),
+                plan_root=args.plan_root.resolve(strict=True),
+                estate_root=args.estate_root.resolve(strict=True),
+                apply=args.apply,
+                approved_digest=args.approved_plan_digest,
             )
             print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))
             return 0

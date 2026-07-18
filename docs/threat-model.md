@@ -7,10 +7,11 @@ workflow permissions, provider configuration, credentials, and the integrity
 of review evidence. Findings, evidence summaries, workflow files, local pins
 files, repository paths, and proposal JSON are untrusted inputs.
 
-`atlas-infra/contracts/v1` is the schema and identity authority. The local
-filesystem is the only Phase 2 execution surface. GitHub, Cloudflare, package
-registries, arbitrary URLs, and production environments are outside the MVP
-boundary.
+`atlas-infra/contracts/v1` is the schema and identity authority. The general
+remediation engine remains local. The separately approved Dependabot rollout
+may contact only GitHub through fixed Git and `gh` invocations after validating
+the reviewed plan. Cloudflare, package registries, arbitrary URLs, and
+production environments remain outside the boundary.
 
 ## Threats and controls
 
@@ -30,13 +31,17 @@ boundary.
 | Mutable action substitution | Pins require an explicit local v1 map and a full lowercase 40-character commit SHA; absent mappings refuse |
 | Upstream or retired code mutation | Deprecated, archived, external-derived, unknown real repositories, and all `simple-proxy` Findings are refused |
 | Proposal replay against drift | Proposal expiry, files list, regenerated change plan, patch digest, and current preimages are revalidated |
+| Estate rollout drift | Apply compares every local HEAD with the live default branch before any write and refuses the entire run on a mismatch |
+| Broad rollout approval | There is no confirm-all option; every repository requires a separate `y` confirmation |
+| Credential persistence | A purpose-specific fine-grained PAT is supplied by environment and passed only to child processes; Git configuration is not changed |
 
 ## Explicit non-goals
 
-The MVP has no secret API, provider token, GitHub App, PR writer, merge path,
-deployment path, provider configuration API, branch protection API, package
-upgrade, lockfile generator, arbitrary YAML parser, arbitrary command runner,
-or arbitrary HTTP client.
+The project has no secret API, provider token, merge path, deployment path,
+provider configuration API, branch protection API, package upgrade, lockfile
+generator, arbitrary YAML parser, arbitrary command runner, or arbitrary HTTP
+client. The rollout PR writer is limited to reviewed Dependabot files and exact
+GitHub Action pin replacements.
 
 ## Residual risks
 

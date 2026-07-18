@@ -1,10 +1,10 @@
 # atlas-gardener
 
-`atlas-gardener` is the Atlas Systems PR-only remediation planner. This Phase 2
-MVP consumes schema-valid Phase 1 `Finding` records and emits deterministic
-`RemediationProposal` JSON. It performs no GitHub write, branch creation, pull
-request creation, merge, deployment, provider configuration, secret access, or
-network request.
+`atlas-gardener` is the Atlas Systems PR-only remediation planner and guarded
+local rollout executor. Its original flow consumes schema-valid Phase 1
+`Finding` records and emits deterministic `RemediationProposal` JSON. The
+separate Dependabot rollout command consumes an owner-reviewed, digest-bound
+plan and can create one branch and draft pull request per confirmed repository.
 
 The repository is the correct ownership boundary because future pull-request
 write access crosses repository trust boundaries. `atlas-infra` remains the
@@ -35,6 +35,13 @@ The engine hard-codes these boundaries:
   an allowlisted fixer; their contents are never interpreted;
 - action pins come only from an explicitly supplied local mapping. The program
   never resolves action SHAs from the network.
+
+The Dependabot rollout phase adds stricter controls: an immutable approved plan
+digest, a clean and current default branch, live default-branch drift checks,
+bounded files, fixed action replacements, one `y/N` prompt per repository, and
+draft pull requests only. It cannot merge, deploy, modify settings, or bypass
+branch protection. `atlas-cv`, `atlas-dep-audit`, and `simple-proxy` are fixed
+exclusions.
 
 See [the threat model](docs/threat-model.md) and the
 [refusal and rollback runbook](docs/runbooks/refusal-and-rollback.md).
@@ -82,6 +89,23 @@ PYTHONPATH=src python3 -m atlas_gardener doctor \
   --contracts-root ../atlas-infra/contracts/v1
 PYTHONPATH=src python3 -m atlas_gardener version
 ```
+
+After generating and reviewing the plan in `atlas-infra`, preview the complete
+estate change from the directory containing the local repository clones:
+
+```bash
+PYTHONPATH=src python3 -m atlas_gardener dependabot-rollout \
+  --plan /tmp/dependabot-rollout-plan/rollout-plan.json \
+  --plan-root /tmp/dependabot-rollout-plan \
+  --estate-root /Users/atlasreaper/Personal \
+  --dry-run
+```
+
+Apply requires a new fine-grained PAT in `ATLAS_DEPENDABOT_WRITE_TOKEN`, scoped
+to the exact eligible repositories with `Contents: write`, `Pull requests:
+write`, and `Workflows: write`. The workflow permission is required because the
+reviewed change creates `.github/workflows/dependabot-automerge.yml`. The token
+is used only by child processes and is not stored in Git configuration.
 
 `apply` without either mode flag is still dry-run. Actual fixture mutation
 requires `apply --apply`. A real local target additionally requires
@@ -133,11 +157,11 @@ no artifact and therefore needs no artifact-retention setting.
 
 ## Current boundaries
 
-This local MVP does not create branches or pull requests, schedule estate
-scans, integrate with `atlas-notify`, discover action pins, parse arbitrary
-YAML, or run target repository validation commands. Validation commands in a
-proposal are inert review instructions. The future GitHub model and exact
-least-privilege permissions are documented in
+The general remediation flow does not create branches or pull requests,
+schedule estate scans, integrate with `atlas-notify`, discover action pins,
+parse arbitrary YAML, or run target repository validation commands. The
+Dependabot rollout is a narrow, owner-executed exception with fixed inputs and
+outputs. The future unattended GitHub model is documented in
 [future GitHub PR model](docs/future-github-pr-model.md).
 
 ## Ownership and licence
