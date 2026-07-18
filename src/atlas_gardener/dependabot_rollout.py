@@ -135,7 +135,12 @@ def _planned_files(plan_root: Path, repository: str, names: object) -> dict[str,
         source = safe_relative_path(plan_root / repo_name, relative, allow_missing=False)
         if not source.is_file():
             raise SafetyRefusal(f"planned file is missing: {source}")
-        files[relative] = source.read_text(encoding="utf-8")
+        content = source.read_text(encoding="utf-8")
+        if TEXT_POLICY.search(content):
+            raise SafetyRefusal(
+                f"text policy violation in generated file {repository}:{relative}"
+            )
+        files[relative] = content
     return files
 
 
