@@ -38,6 +38,16 @@ deployment credential, webhook secret, or billing credential is required.
 Provider values must never enter a Finding, proposal, evidence summary, log, or
 test fixture.
 
+## Current owner-executed rollout exception
+
+The approved Dependabot rollout is not an unattended integration. The owner
+runs it locally against a digest-bound plan and confirms every repository. It
+uses a new fine-grained PAT restricted to selected repositories with Contents,
+Pull requests, and Workflows write permissions. It may create only
+`chore/dependabot-rollout` and a draft pull request. It cannot merge, deploy, or
+change repository settings. The future unattended model above still requires a
+GitHub App and does not reuse this local token.
+
 ## Pull-request behavior
 
 One fingerprint and fixer type produces one draft PR. Branch names and commit
