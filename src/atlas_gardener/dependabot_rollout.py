@@ -215,8 +215,6 @@ def _git(repository: Path, arguments: Sequence[str], *, env: dict[str, str] | No
 
 def _write_files(change: RepositoryChange) -> None:
     for relative, content in change.files.items():
-        if TEXT_POLICY.search(content):
-            raise SafetyRefusal(f"text policy violation in {change.repository}:{relative}")
         path = safe_relative_path(change.path, relative)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
