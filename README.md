@@ -8,8 +8,8 @@ plan and can create one branch and draft pull request per confirmed repository.
 
 The repository is the correct ownership boundary because future pull-request
 write access crosses repository trust boundaries. `atlas-infra` remains the
-contract and policy authority, and `atlas-dep-audit` remains a Finding producer
-and contract-assurance consumer.
+contract and public policy authority, and `atlas-dep-audit` remains a Finding
+producer and contract-assurance consumer.
 
 ## Safety posture
 
@@ -17,6 +17,13 @@ Dry-run is always the default. The only local write path is `apply --apply`, and
 it accepts disposable repositories containing `.atlas-gardener-fixture` or a
 real local repository explicitly passed with `--allow-local-target`. A real
 target must be clean, classified, and on a named branch other than `main`.
+
+Repository eligibility is classification-driven. Gardener resolves a private
+real target from its source-owned `.atlas/governance.json`. It resolves a public
+runtime target from the authoritative sibling `atlas-infra/policy/estate-registry.json`
+or from `ATLAS_GARDENER_INFRA_ROOT` when that root is explicitly supplied.
+Unknown real targets fail closed. Gardener does not carry a public list of
+private repository identities.
 
 The engine hard-codes these boundaries:
 
@@ -26,7 +33,6 @@ The engine hard-codes these boundaries:
   Finding or proposal;
 - no dependency or lockfile fixer;
 - no deprecated, archived, or external-derived repository remediation;
-- complete exclusion of `simple-proxy`;
 - one fixer type, at most five files, and at most 200 changed lines per
   proposal;
 - repository-relative UTF-8 text edits only, with traversal, escaping symlink,
@@ -37,11 +43,12 @@ The engine hard-codes these boundaries:
   never resolves action SHAs from the network.
 
 The Dependabot rollout phase adds stricter controls: an immutable approved plan
-digest, a clean and current default branch, live default-branch drift checks,
-bounded files, fixed action replacements, one `y/N` prompt per repository, and
-draft pull requests only. It cannot merge, deploy, modify settings, or bypass
-branch protection. `atlas-cv`, `atlas-dep-audit`, and `simple-proxy` are fixed
-exclusions.
+digest, classification validation at execution time, a clean and current
+default branch, live default-branch drift checks, bounded files, fixed action
+replacements, one `y/N` prompt per repository, and draft pull requests only. It
+cannot merge, deploy, modify settings, or bypass branch protection. The public
+supply-chain audit repository remains an explicit rollout exclusion because it
+owns the dependency-assurance mechanism being changed.
 
 See [the threat model](docs/threat-model.md) and the
 [refusal and rollback runbook](docs/runbooks/refusal-and-rollback.md).
@@ -60,6 +67,24 @@ python3 -m pip install --no-deps --no-build-isolation -e .
 ```
 
 For source-tree development, use `PYTHONPATH=src` as shown below.
+
+## Classification inputs
+
+Gardener never decides that an unknown repository is safe to modify.
+
+For a source-owned private repository, the local target must contain a valid
+`.atlas/governance.json` whose repository identity matches the target,
+`visibility` is `private`, `estate_membership` is `internal`, and
+`public_projection` is `false`. Lifecycle and provenance then feed the normal
+remediation safety checks.
+
+For an approved public runtime, Gardener reads the public registry from a local
+`atlas-infra` checkout. The default discovery path is a sibling checkout. Set
+`ATLAS_GARDENER_INFRA_ROOT` only when the authoritative checkout lives elsewhere.
+
+A public non-runtime repository without an authoritative classification source
+is currently refused rather than assigned an inferred lifecycle or provenance.
+That limitation is deliberate.
 
 ## CLI
 
@@ -101,11 +126,11 @@ PYTHONPATH=src python3 -m atlas_gardener dependabot-rollout \
   --dry-run
 ```
 
-Apply requires a new fine-grained PAT in `ATLAS_DEPENDABOT_WRITE_TOKEN`, scoped
+Apply requires a fine-grained token in `ATLAS_DEPENDABOT_WRITE_TOKEN`, scoped
 to the exact eligible repositories with `Contents: write`, `Pull requests:
-write`, and `Workflows: write`. The workflow permission is required because the
-reviewed change creates `.github/workflows/dependabot-automerge.yml`. The token
-is used only by child processes and is not stored in Git configuration.
+write`, and `Workflows: write`. Workflow write is required only because the
+reviewed rollout can create `.github/workflows/dependabot-automerge.yml`. The
+token is used only by child processes and is not stored in Git configuration.
 
 `apply` without either mode flag is still dry-run. Actual fixture mutation
 requires `apply --apply`. A real local target additionally requires
