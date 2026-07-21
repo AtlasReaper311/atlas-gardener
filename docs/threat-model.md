@@ -5,13 +5,17 @@
 The protected assets are target repository contents, default branches,
 workflow permissions, provider configuration, credentials, and the integrity
 of review evidence. Findings, evidence summaries, workflow files, local pins
-files, repository paths, and proposal JSON are untrusted inputs.
+files, repository paths, source-owned governance, public registry data, and
+proposal JSON are untrusted inputs until validated.
 
-`atlas-infra/contracts/v1` is the schema and identity authority. The general
-remediation engine remains local. The separately approved Dependabot rollout
-may contact only GitHub through fixed Git and `gh` invocations after validating
-the reviewed plan. Cloudflare, package registries, arbitrary URLs, and
-production environments remain outside the boundary.
+`atlas-infra/contracts/v1` is the schema and identity authority. Public runtime
+classification comes from the authoritative local `atlas-infra` registry.
+Private repository classification comes from validated source-owned governance
+inside the authenticated/local target. The general remediation engine remains
+local. The separately approved Dependabot rollout may contact only GitHub
+through fixed Git and `gh` invocations after validating the reviewed plan.
+Cloudflare, package registries, arbitrary URLs, and production environments
+remain outside the boundary.
 
 ## Threats and controls
 
@@ -29,7 +33,8 @@ production environments remain outside the boundary.
 | Scope or supply-chain expansion | Five fixed fixer IDs, five-file and 200-line limits, no dependency or lockfile fixer |
 | Dangerous workflow permission reduction | Permissions fixer refuses deploy, release, publishing, issue/PR writing, environment mutation, secrets, network commands, unknown actions, and privileged PR triggers |
 | Mutable action substitution | Pins require an explicit local v1 map and a full lowercase 40-character commit SHA; absent mappings refuse |
-| Upstream or retired code mutation | Deprecated, archived, external-derived, unknown real repositories, and all `simple-proxy` Findings are refused |
+| Unapproved or retired code mutation | Classification must resolve from current approved governance; deprecated, archived, external-derived, malformed, and unknown real targets are refused |
+| Private identity publication | Gardener contains no private repository allowlist or exclusion list; private classification is read from the target and is not copied into public policy or reports |
 | Proposal replay against drift | Proposal expiry, files list, regenerated change plan, patch digest, and current preimages are revalidated |
 | Estate rollout drift | Apply compares every local HEAD with the live default branch before any write and refuses the entire run on a mismatch |
 | Broad rollout approval | There is no confirm-all option; every repository requires a separate `y` confirmation |

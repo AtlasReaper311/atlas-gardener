@@ -52,7 +52,7 @@ class DependabotRolloutTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
-    def repository(self, name: str) -> Path:
+    def repository(self, name: str, *, fixture: bool = True) -> Path:
         repository = self.estate / name
         repository.mkdir()
         subprocess.run(
@@ -69,8 +69,12 @@ class DependabotRolloutTests(unittest.TestCase):
             check=True,
         )
         (repository / "README.md").write_text("fixture\n", encoding="utf-8")
+        tracked = ["README.md"]
+        if fixture:
+            (repository / ".atlas-gardener-fixture").write_text("fixture\n", encoding="utf-8")
+            tracked.append(".atlas-gardener-fixture")
         subprocess.run(
-            ["git", "-C", str(repository), "add", "README.md"], check=True
+            ["git", "-C", str(repository), "add", *tracked], check=True
         )
         subprocess.run(
             ["git", "-C", str(repository), "commit", "-m", "fixture"],
@@ -78,6 +82,37 @@ class DependabotRolloutTests(unittest.TestCase):
             capture_output=True,
         )
         return repository
+
+    def source_governance(
+        self,
+        repository: Path,
+        *,
+        lifecycle: str = "active",
+        provenance: str = "original",
+    ) -> None:
+        path = repository / ".atlas" / "governance.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(
+            path,
+            {
+                "schema_version": "atlas-repository-governance/v1",
+                "repository": f"AtlasReaper311/{repository.name}",
+                "visibility": "private",
+                "estate_membership": "internal",
+                "lifecycle": lifecycle,
+                "provenance": provenance,
+                "public_projection": False,
+            },
+        )
+        subprocess.run(
+            ["git", "-C", str(repository), "add", ".atlas/governance.json"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repository), "commit", "-m", "governance"],
+            check=True,
+            capture_output=True,
+        )
 
     def test_plan_digest_and_owner_digest_are_enforced(self) -> None:
         path = self.root / "plan.json"
@@ -136,21 +171,66 @@ class DependabotRolloutTests(unittest.TestCase):
         self.assertIn("Node 24", changes[0].files[".github/workflows/ci.yml"])
         self.assertIn("setup-node@820762", render_diff(changes[0]))
 
-    def test_excluded_repositories_are_never_changed(self) -> None:
-        for name in ("atlas-cv", "atlas-dep-audit", "simple-proxy"):
-            self.repository(name)
+    def test_public_rollout_exclusion_is_never_changed(self) -> None:
+        self.repository("atlas-dep-audit")
         value = plan(
             [
                 {
-                    "repository": f"AtlasReaper311/{name}",
+                    "repository": "AtlasReaper311/atlas-dep-audit",
                     "action": "propose",
                     "default_branch": "main",
                     "files": [],
                 }
-                for name in ("atlas-cv", "atlas-dep-audit", "simple-proxy")
             ]
         )
         self.assertEqual([], build_changes(value, self.plan_root, self.estate))
+
+    def test_deprecated_source_governance_refuses_proposed_change(self) -> None:
+        repository = self.repository("example-deprecated", fixture=False)
+        self.source_governance(repository, lifecycle="deprecated")
+        value = plan(
+            [
+                {
+                    "repository": "AtlasReaper311/example-deprecated",
+                    "action": "propose",
+                    "default_branch": "main",
+                    "files": [],
+                }
+            ]
+        )
+        with self.assertRaisesRegex(SafetyRefusal, "deprecated"):
+            build_changes(value, self.plan_root, self.estate)
+
+    def test_external_derived_source_governance_refuses_proposed_change(self) -> None:
+        repository = self.repository("example-external", fixture=False)
+        self.source_governance(repository, provenance="external-derived")
+        value = plan(
+            [
+                {
+                    "repository": "AtlasReaper311/example-external",
+                    "action": "propose",
+                    "default_branch": "main",
+                    "files": [],
+                }
+            ]
+        )
+        with self.assertRaisesRegex(SafetyRefusal, "external-derived"):
+            build_changes(value, self.plan_root, self.estate)
+
+    def test_unknown_real_repository_refuses_proposed_change(self) -> None:
+        self.repository("example-unknown", fixture=False)
+        value = plan(
+            [
+                {
+                    "repository": "AtlasReaper311/example-unknown",
+                    "action": "propose",
+                    "default_branch": "main",
+                    "files": [],
+                }
+            ]
+        )
+        with self.assertRaisesRegex(SafetyRefusal, "classification is unavailable"):
+            build_changes(value, self.plan_root, self.estate)
 
     def test_dry_run_writes_no_repository_files(self) -> None:
         repository = self.repository("example")
@@ -182,12 +262,14 @@ class DependabotRolloutTests(unittest.TestCase):
     def test_planned_path_traversal_is_refused(self) -> None:
         self.repository("example")
         value = plan(
-            [{
-                "repository": "AtlasReaper311/example",
-                "action": "propose",
-                "default_branch": "main",
-                "files": ["../escape.yml"],
-            }]
+            [
+                {
+                    "repository": "AtlasReaper311/example",
+                    "action": "propose",
+                    "default_branch": "main",
+                    "files": ["../escape.yml"],
+                }
+            ]
         )
         with self.assertRaises(SafetyRefusal):
             build_changes(value, self.plan_root, self.estate)

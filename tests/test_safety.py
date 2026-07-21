@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -10,7 +11,7 @@ from pathlib import Path
 from atlas_gardener.engine import propose
 from atlas_gardener.errors import SafetyRefusal
 from atlas_gardener.models import RepositoryClassification
-from atlas_gardener.safety import safe_relative_path
+from atlas_gardener.safety import classification_for, safe_relative_path
 
 from tests.helpers import (
     contracts,
@@ -24,17 +25,121 @@ class SafetyRefusalTests(unittest.TestCase):
     def setUp(self) -> None:
         self.contracts = contracts()
 
-    def test_simple_proxy_is_completely_excluded(self) -> None:
+    def test_source_owned_deprecated_private_repository_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            repository = make_fixture_repository(Path(directory), "simple-proxy")
+            repository = Path(directory) / "example-private-deprecated"
+            (repository / ".atlas").mkdir(parents=True)
+            (repository / ".atlas" / "governance.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "atlas-repository-governance/v1",
+                        "repository": "AtlasReaper311/example-private-deprecated",
+                        "visibility": "private",
+                        "estate_membership": "internal",
+                        "lifecycle": "deprecated",
+                        "provenance": "original",
+                        "public_projection": False,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
             finding = make_finding(
                 self.contracts,
-                repository="simple-proxy",
+                repository=repository.name,
                 rule_id="macos-metadata-ignore",
                 location=".DS_Store",
             )
-            with self.assertRaisesRegex(SafetyRefusal, "completely excluded"):
+            with self.assertRaisesRegex(SafetyRefusal, "deprecated"):
                 propose(finding, repository, self.contracts)
+
+    def test_private_classification_comes_from_source_governance(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory) / "example-private"
+            (repository / ".atlas").mkdir(parents=True)
+            (repository / ".atlas" / "governance.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "atlas-repository-governance/v1",
+                        "repository": "AtlasReaper311/example-private",
+                        "visibility": "private",
+                        "estate_membership": "internal",
+                        "lifecycle": "active",
+                        "provenance": "original",
+                        "public_projection": False,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            classification = classification_for(repository.name, repository)
+
+        self.assertEqual(
+            RepositoryClassification("active", "internal", "original"),
+            classification,
+        )
+
+    def test_private_governance_public_projection_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory) / "example-private"
+            (repository / ".atlas").mkdir(parents=True)
+            (repository / ".atlas" / "governance.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "atlas-repository-governance/v1",
+                        "repository": "AtlasReaper311/example-private",
+                        "visibility": "private",
+                        "estate_membership": "internal",
+                        "lifecycle": "active",
+                        "provenance": "original",
+                        "public_projection": True,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(SafetyRefusal, "public_projection=false"):
+                classification_for(repository.name, repository)
+
+    def test_public_runtime_classification_comes_from_sibling_infra_registry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            estate = Path(directory)
+            repository = estate / "example-public"
+            repository.mkdir()
+            policy = estate / "atlas-infra" / "policy"
+            policy.mkdir(parents=True)
+            (policy / "estate-registry.json").write_text(
+                json.dumps(
+                    {
+                        "repositories": [
+                            {
+                                "repository": "AtlasReaper311/example-public",
+                                "lifecycle": "production",
+                                "scope": "public",
+                                "provenance": "original",
+                            }
+                        ]
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            classification = classification_for(repository.name, repository)
+
+        self.assertEqual(
+            RepositoryClassification("production", "public", "original"),
+            classification,
+        )
+
+    def test_unknown_real_repository_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory) / "unknown-real"
+            repository.mkdir()
+            with self.assertRaisesRegex(SafetyRefusal, "classification is unavailable"):
+                classification_for(repository.name, repository)
 
     def test_deprecated_repository_is_refused(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

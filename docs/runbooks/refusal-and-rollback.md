@@ -5,8 +5,11 @@
 1. Read the exact refusal reason; do not weaken or bypass the guard.
 2. Confirm the Finding validates against the current local
    `atlas-infra/contracts/v1` and its fingerprint is canonical.
-3. Confirm repository classification. Deprecated, archived, external-derived,
-   unknown real targets, and `simple-proxy` remain excluded.
+3. Confirm repository classification comes from an approved source. Public
+   runtime classification comes from the authoritative local `atlas-infra`
+   registry. Private classification comes from source-owned
+   `.atlas/governance.json`. Deprecated, archived, external-derived, malformed,
+   and unknown real targets remain excluded.
 4. Confirm the target is the repository named by the Finding, the path stays
    below its root, and no symlink escapes it.
 5. For a real target, use a named non-`main` branch and make the worktree clean.

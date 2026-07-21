@@ -15,15 +15,16 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from atlas_gardener.errors import GardenerError, SafetyRefusal
-from atlas_gardener.safety import ensure_clean_worktree, safe_relative_path
+from atlas_gardener.safety import (
+    classification_for,
+    ensure_clean_worktree,
+    ensure_remediation_allowed,
+    safe_relative_path,
+)
 
 
 BRANCH_NAME = "chore/dependabot-rollout"
-EXCLUDED_REPOSITORIES = {
-    "AtlasReaper311/atlas-cv",
-    "AtlasReaper311/atlas-dep-audit",
-    "AtlasReaper311/simple-proxy",
-}
+PUBLIC_ROLLOUT_EXCLUSIONS = {"AtlasReaper311/atlas-dep-audit"}
 FORBIDDEN_TEXT = (
     chr(0x2014),
     "lever" + "aged",
@@ -129,7 +130,10 @@ def _node24_workflow_changes(repository: Path) -> dict[str, str]:
 def _planned_files(plan_root: Path, repository: str, names: object) -> dict[str, str]:
     if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
         raise SafetyRefusal(f"planned files are malformed for {repository}")
-    repo_name = repository.split("/", 1)[1]
+    parts = repository.split("/", 1)
+    if len(parts) != 2 or not all(parts):
+        raise SafetyRefusal("plan repository name is malformed")
+    repo_name = parts[1]
     files: dict[str, str] = {}
     for relative in names:
         source = safe_relative_path(plan_root / repo_name, relative, allow_missing=False)
@@ -152,15 +156,22 @@ def build_changes(plan: dict, plan_root: Path, estate_root: Path) -> list[Reposi
         repository = entry.get("repository")
         if not isinstance(repository, str):
             raise SafetyRefusal("plan repository name is malformed")
-        if repository in EXCLUDED_REPOSITORIES:
+        if repository in PUBLIC_ROLLOUT_EXCLUSIONS:
             continue
         if entry.get("action") != "propose":
             continue
-        repo_name = repository.split("/", 1)[1]
+        parts = repository.split("/", 1)
+        if len(parts) != 2 or not all(parts):
+            raise SafetyRefusal("plan repository name is malformed")
+        repo_name = parts[1]
         target = estate_root / repo_name
         if not (target / ".git").exists():
             raise SafetyRefusal(f"local clone is missing: {target}")
+
+        classification = classification_for(repo_name, target)
+        ensure_remediation_allowed(repo_name, classification)
         ensure_clean_worktree(target, fixer_id="dependabot-rollout")
+
         default_branch = entry.get("default_branch")
         if not isinstance(default_branch, str) or not default_branch:
             raise SafetyRefusal(f"default branch is missing for {repository}")
