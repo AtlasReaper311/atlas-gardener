@@ -6,6 +6,7 @@ import json
 import os
 import importlib.util
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,13 @@ def canonical_contract_validator():
     return module
 
 
+def current_fixture_detected_at() -> str:
+    """Return a non-future fixture time that remains inside the proposal expiry window."""
+
+    detected = datetime.now(timezone.utc) - timedelta(minutes=1)
+    return detected.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 def make_finding(
     contract_set: ContractSet,
     *,
@@ -47,6 +55,7 @@ def make_finding(
     location: str,
     eligible: bool = True,
     summary: str = "A deterministic fixture finding requires remediation.",
+    detected_at: str | None = None,
 ) -> dict[str, Any]:
     finding: dict[str, Any] = {
         "schema_version": "atlas-control-plane/finding/v1",
@@ -67,7 +76,7 @@ def make_finding(
             ],
             "redacted": True,
         },
-        "detected_at": "2026-07-14T10:00:00Z",
+        "detected_at": detected_at or current_fixture_detected_at(),
         "fingerprint": "sha256:" + "0" * 64,
         "remediation": {
             "eligible": eligible,
