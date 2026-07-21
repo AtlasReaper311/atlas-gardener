@@ -48,15 +48,28 @@ class EngineIntegrationTests(unittest.TestCase):
             self.assertEqual(1, len(first["proposals"]))
             self.assertEqual(1, len(first["evidence_summaries"]))
 
-    def test_scan_records_simple_proxy_refusal_without_a_proposal(self) -> None:
+    def test_scan_records_deprecated_source_refusal_without_a_proposal(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             estate = root / "estate"
             estate.mkdir()
-            make_fixture_repository(estate, "simple-proxy")
+            repository = estate / "example-private-deprecated"
+            (repository / ".atlas").mkdir(parents=True)
+            write_json(
+                repository / ".atlas" / "governance.json",
+                {
+                    "schema_version": "atlas-repository-governance/v1",
+                    "repository": "AtlasReaper311/example-private-deprecated",
+                    "visibility": "private",
+                    "estate_membership": "internal",
+                    "lifecycle": "deprecated",
+                    "provenance": "original",
+                    "public_projection": False,
+                },
+            )
             finding = make_finding(
                 self.contracts,
-                repository="simple-proxy",
+                repository=repository.name,
                 rule_id="macos-metadata-ignore",
                 location=".DS_Store",
             )
@@ -66,7 +79,7 @@ class EngineIntegrationTests(unittest.TestCase):
             report = scan(path, estate, self.contracts)
 
             self.assertEqual([], report["proposals"])
-            self.assertIn("completely excluded", report["refusals"][0]["reason"])
+            self.assertIn("deprecated", report["refusals"][0]["reason"])
 
     def test_apply_is_dry_run_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
