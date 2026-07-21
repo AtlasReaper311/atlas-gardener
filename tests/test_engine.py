@@ -106,27 +106,37 @@ class EngineIntegrationTests(unittest.TestCase):
     def test_real_local_apply_requires_explicit_flag(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            repository = root / "atlas-badges"
+            repository = root / "example-public-runtime"
             repository.mkdir()
             init_dirty_repository(repository)
             # The metadata-only exception permits proposal creation, while apply remains gated.
             (repository / "dirty.txt").unlink()
             (repository / ".DS_Store").write_bytes(b"metadata")
+
+            write_json(
+                root / "atlas-infra" / "policy" / "estate-registry.json",
+                {
+                    "repositories": [
+                        {
+                            "repository": "AtlasReaper311/example-public-runtime",
+                            "lifecycle": "active",
+                            "scope": "public",
+                            "provenance": "original",
+                        }
+                    ]
+                },
+            )
+
             finding = make_finding(
                 self.contracts,
                 repository=repository.name,
                 rule_id="macos-metadata-ignore",
                 location=".DS_Store",
             )
-            from atlas_gardener.models import RepositoryClassification
-
             proposal, _, _ = propose(
                 finding,
                 repository,
                 self.contracts,
-                classification_override=RepositoryClassification(
-                    "active", "internal", "original"
-                ),
             )
             proposal_path = root / "proposal.json"
             write_json(proposal_path, proposal)
