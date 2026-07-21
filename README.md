@@ -1,4 +1,20 @@
+<div align="center">
+  <img src="https://raw.githubusercontent.com/AtlasReaper311/AtlasReaper311/main/atlas-icon-dark-256.png" width="88" alt="Atlas Systems"/>
+</div>
+
 # atlas-gardener
+
+```
+┌─────────────────────────────────────────────┐
+│  ATLAS SYSTEMS // atlas-gardener            │
+│  bounded remediation proposals              │
+└─────────────────────────────────────────────┘
+```
+
+[![CI](https://github.com/AtlasReaper311/atlas-gardener/actions/workflows/ci.yml/badge.svg)](https://github.com/AtlasReaper311/atlas-gardener/actions)
+![Python](https://img.shields.io/badge/python-3.12-f5a623?style=flat-square&labelColor=0a0a0f)
+![Safety](https://img.shields.io/badge/write%20boundary-PR%20only-4ade80?style=flat-square&labelColor=0a0a0f)
+![Cost](https://img.shields.io/badge/cost-%C2%A30-aaa9a0?style=flat-square&labelColor=0a0a0f)
 
 `atlas-gardener` is the Atlas Systems PR-only remediation planner and guarded
 local rollout executor. Its original flow consumes schema-valid Phase 1
@@ -193,3 +209,13 @@ outputs. The future unattended GitHub model is documented in
 
 Owner: Atlas Reaper / `AtlasReaper311`. The code is MIT licensed. See
 [ownership](docs/ownership.md) for component and contract responsibilities.
+
+## How it fits into Atlas Systems
+
+`atlas-gardener` is the bounded remediation proposal layer. It can turn validated findings into reviewable changes while `atlas-infra` remains the policy authority and repository owners retain merge and deployment authority.
+
+The transferable principle is to separate detection, proposal, approval, and production mutation so automation cannot silently acquire more authority than its evidence warrants.
+
+---
+
+Part of [atlas-systems.uk](https://atlas-systems.uk) · MIT License
