@@ -1,12 +1,22 @@
 # GitHub App draft-PR adapter
 
-Wave 3.7 adds the final controlled write seam to Atlas Gardener: an exact reviewed proposal can be converted into a deterministic remote PR plan and, after a separate owner approval, applied with a short-lived GitHub App installation token.
+Wave 3.7 adds the final controlled write seam to Atlas Gardener. It converts one reviewed `RemediationProposal` into a deterministic remote plan and can apply that exact plan with a short-lived GitHub App installation token.
 
-The adapter stops at a draft pull request. It does not approve or merge the PR, deploy anything, change repository settings or secrets, or mutate Cloudflare, Home Assistant, Open WebUI, Ollama, or another provider.
+The adapter stops after opening one draft pull request. It cannot approve, merge, deploy, dispatch workflows, alter repository settings, read secrets, or mutate Cloudflare, Home Assistant, Open WebUI, Ollama, or another provider.
 
-## Two-step workflow
+## Source and provider states
 
-First build the remote plan offline from an already reviewed `RemediationProposal` and a clean checkout at the exact target base commit:
+The implementation has three separate states:
+
+1. source complete and CI green;
+2. GitHub App created and installed on one selected repository;
+3. one bounded canary draft PR verified.
+
+A merged source PR proves only the first state. It does not create or activate a GitHub App.
+
+## Build the exact plan
+
+Generate the remote plan from a clean checkout on the exact target base commit:
 
 ```bash
 atlas-gardener github-app-pr-plan \
@@ -15,11 +25,23 @@ atlas-gardener github-app-pr-plan \
   --output /tmp/github-app-pr-plan.json
 ```
 
-The planner re-validates the proposal, re-runs the deterministic fixer, requires the same file list and patch digest, checks that the repository is clean, verifies the GitHub origin, records the exact base SHA and base blob SHAs, and computes a new canonical plan digest.
+The planner:
 
-Review that plan before any network operation.
+- validates the authoritative proposal contract;
+- regenerates the deterministic fixer;
+- requires the same file list and patch digest;
+- rechecks lifecycle, scope, and provenance;
+- rejects deprecated, archived, and external-derived targets;
+- records the target classification fingerprint;
+- requires a clean checkout on the named base branch;
+- records the exact base commit, file modes, base blob SHAs, and preimage/postimage digests;
+- rejects binary, symlink, secret-bearing, credential-like, and path-escaping output;
+- rejects `.github/workflows/**` in v1;
+- computes one canonical plan digest.
 
-A dry review of the stored plan is still provider-free:
+Unknown classification fails closed. Private repositories use source-owned `.atlas/governance.json`; public runtime repositories use the local authoritative Atlas Infra registry.
+
+## Review without network access
 
 ```bash
 atlas-gardener github-app-pr \
@@ -27,33 +49,34 @@ atlas-gardener github-app-pr \
   --dry-run
 ```
 
-The summary deliberately omits file contents and credentials while retaining the exact file hashes, target repository, base SHA, branch, requested permission set, and plan digest.
+The summary contains identities, hashes, risk, expiry, target classification fingerprint, permission requirements, and file paths. It omits file contents and credentials.
 
 ## Apply gate
 
-Application requires all of the following:
+Application requires:
 
-1. the exact reviewed plan file;
-2. the exact `--approved-plan-digest` from that plan;
-3. an interactive confirmation;
-4. a short-lived GitHub App installation token supplied through the approved external broker in `ATLAS_GARDENER_INSTALLATION_TOKEN`;
-5. the remote base branch still pointing at the exact reviewed base SHA;
-6. the deterministic `gardener/...` branch not already existing.
-
-Example shape after an approved token has been injected into the process environment:
+1. the exact reviewed plan;
+2. the exact approved plan digest;
+3. the clean target checkout through `--repo`;
+4. target classification still matching the reviewed fingerprint;
+5. local and remote base branches still pointing at the reviewed commit;
+6. the deterministic Gardener branch not existing;
+7. interactive confirmation;
+8. a short-lived token in `ATLAS_GARDENER_INSTALLATION_TOKEN`.
 
 ```bash
 atlas-gardener github-app-pr \
   --plan /tmp/github-app-pr-plan.json \
+  --repo ~/Personal/example-repository \
   --approved-plan-digest sha256:<reviewed-digest> \
   --apply
 ```
 
-Do not paste the installation token into the command, repository, issue, pull request, chat, or shell history. The adapter reads it only from the process environment and never prints it.
+Do not put the token in the command, repository, issue, pull request, chat, or shell history.
 
 ## Permission contract
 
-The remote plan accepts only this GitHub App permission set:
+The v1 adapter accepts only:
 
 ```text
 Metadata: read
@@ -61,70 +84,45 @@ Contents: write
 Pull requests: write
 ```
 
-No Actions, Checks, Administration, Environments, Secrets, Deployments, Issues, or Organization permission is requested by the adapter.
+It does not request Actions, Checks, Administration, Environments, Deployments, Issues, Secrets, Variables, Members, Billing, or organization administration.
 
-The adapter intentionally does not poll native PR checks because doing so would widen the App permission surface. Repository-owned `pull_request` workflows run normally when the draft PR opens. Their results remain visible in GitHub for the human reviewer.
+Workflow-file proposals are refused in v1. Supporting them later requires a separate reviewed contract and a separately enabled GitHub App permission boundary. The current adapter never silently widens its permission set.
 
 ## Exact remote sequence
 
-After all preflight checks pass, the only GitHub REST mutations are:
+After all checks pass, the bounded GitHub REST transport can perform only:
 
-1. create `refs/heads/gardener/...` from the exact reviewed base SHA;
-2. write or delete only the reviewed one-to-five files using the exact base blob SHA where required;
-3. open one draft pull request from that branch to the reviewed base branch;
-4. stop.
+1. read the exact base ref;
+2. prove the deterministic branch does not exist;
+3. read the exact base commit tree;
+4. create reviewed file blobs;
+5. create one tree from the exact base tree;
+6. create one commit with the reviewed base commit as its only parent;
+7. recheck the remote base ref;
+8. create the deterministic branch at that one commit;
+9. open one draft pull request;
+10. stop.
 
-The adapter has no merge endpoint, auto-merge endpoint, review-approval endpoint, repository-settings endpoint, secret endpoint, workflow-dispatch endpoint, or provider-write endpoint.
+The transport has an explicit method-and-path allowlist, a 30-second request timeout, and a one-megabyte response limit. It has no Contents API loop, merge endpoint, review endpoint, workflow-dispatch endpoint, settings endpoint, branch-deletion endpoint, or provider endpoint.
 
-If a remote write fails after the branch was created, the adapter fails and leaves the partial Gardener branch for explicit owner inspection. It does not silently delete or rewrite remote history as cleanup.
+Creating blobs, a tree, and a commit before the branch avoids a partially modified remote branch. If the base moves during preparation, Gardener refuses before creating the branch or pull request. Unreferenced Git objects may remain for normal GitHub garbage collection; Gardener does not perform cleanup writes.
 
-## Token broker boundary
+## Draft PR evidence
 
-Atlas Gardener does not mint installation tokens and does not read a GitHub App private key.
+The generated pull request body records:
 
-App creation, App installation, private-key custody, and short-lived installation-token minting belong to the provider-side credential boundary. They must be configured separately through an approved secret mechanism. This keeps private-key material outside the repository and outside the Gardener process that handles remediation content.
-
-The current source is therefore ready to consume an ephemeral App installation token, but no GitHub App has been created or installed by this source change.
-
-## Plan integrity
-
-The v1 remote plan records:
-
-- exact repository;
-- exact base branch and 40-character base commit;
-- deterministic Gardener branch;
-- original proposal/finding/patch identities;
-- one-to-five exact file operations;
-- base blob SHA for replacement/deletion;
-- before/after SHA-256 fingerprints;
-- UTF-8 after content for reviewed create/replace operations;
-- validation plan inherited from the reviewed remediation proposal;
+- finding fingerprint;
+- fixer ID and version;
+- proposal ID;
+- plan digest;
+- patch digest;
+- risk class;
 - expiry;
-- exact permission requirement;
-- `stop_after = draft-pull-request`.
-
-Changing any of those values invalidates the plan digest.
-
-## Safety refusals
-
-The adapter refuses, among other cases:
-
-- non-Atlas repository targets;
-- origin/directory identity disagreement;
-- dirty worktrees;
-- expired proposals or plans;
-- changed deterministic patch digest;
-- more than five changed files;
-- unsafe, binary, credential-like, or path-escaping files;
-- remote base-branch drift;
-- existing Gardener branch;
-- digest mismatch;
-- missing or implausibly short installation token;
-- unexpected permission declarations;
-- non-draft stop semantics.
+- exact files and modes;
+- repository-owned validation mapping;
+- rollback instructions;
+- an explicit statement that no approval, merge, deployment, workflow dispatch, settings change, secret action, or non-GitHub provider mutation occurred.
 
 ## Provider rollout remains separate
 
-Merging the source adapter does not create or install a GitHub App and does not grant any new permission to Atlas Gardener.
-
-A later provider rollout, if approved, must create the App with only the permission contract above, install it only on the intended Atlas repositories, store its private key through the approved secret mechanism, and provide an external short-lived token broker. That provider action remains outside source merge authority.
+A later owner-approved provider rollout must create the GitHub App, limit installation to one canary repository, keep private-key custody outside Gardener, mint one short-lived installation token, and verify one draft PR against the provider rollout checklist.
