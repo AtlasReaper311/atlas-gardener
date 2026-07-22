@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -23,7 +24,14 @@ from atlas_gardener.automation import (
 from atlas_gardener.errors import GardenerError, SafetyRefusal
 
 SUCCESS_STATES = {"SUCCESS", "NEUTRAL"}
-PENDING_STATES = {"EXPECTED", "PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"}
+PENDING_STATES = {
+    "EXPECTED",
+    "PENDING",
+    "QUEUED",
+    "IN_PROGRESS",
+    "WAITING",
+    "REQUESTED",
+}
 FAILURE_STATES = {
     "ACTION_REQUIRED",
     "CANCELLED",
@@ -40,6 +48,14 @@ def load_json(path: Path, label: str) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise SafetyRefusal(f"cannot read valid {label}: {error}") from error
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def _check_names(pr: dict[str, Any]) -> dict[str, str]:
@@ -79,6 +95,8 @@ def validate_gate(
     coverage: dict[str, Any],
     expected_app_login: str,
     required_checks: list[str],
+    base_file: Path | None,
+    head_file: Path,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     validate_policy(policy, coverage)
@@ -110,7 +128,9 @@ def validate_gate(
         raise SafetyRefusal("public coverage policy changed after approval")
     current = now or datetime.now(timezone.utc)
     try:
-        expires = datetime.fromisoformat(str(approval.get("expires_at", "")).replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(
+            str(approval.get("expires_at", "")).replace("Z", "+00:00")
+        )
     except ValueError as error:
         raise SafetyRefusal("approval expiry is invalid") from error
     if expires.tzinfo is None or current > expires:
@@ -128,11 +148,16 @@ def validate_gate(
     if len(files) != 1:
         raise SafetyRefusal("automatic merge requires exactly one changed file")
     item = files[0]
-    if item.get("filename") != ".gitignore" or item.get("status") not in {"added", "modified"}:
+    if item.get("filename") != ".gitignore" or item.get("status") not in {
+        "added",
+        "modified",
+    }:
         raise SafetyRefusal("automatic merge is restricted to .gitignore additions")
     if int(item.get("deletions", 0)) != 0:
         raise SafetyRefusal("automatic merge cannot delete lines")
-    if int(item.get("additions", 0)) > policy["automatic_merge_limits"]["maximum_changed_lines"]:
+    if int(item.get("additions", 0)) > policy["automatic_merge_limits"][
+        "maximum_changed_lines"
+    ]:
         raise SafetyRefusal("automatic merge line bound exceeded")
     added, removed = _patch_added_lines(files)
     if removed:
@@ -143,16 +168,44 @@ def validate_gate(
     approval_files = approval.get("files")
     if not isinstance(approval_files, list) or len(approval_files) != 1:
         raise SafetyRefusal("approval file list is invalid")
-    if approval_files[0].get("path") != ".gitignore" or approval_files[0].get("mode") != "100644":
+    approval_file = approval_files[0]
+    if approval_file.get("path") != ".gitignore" or approval_file.get("mode") != "100644":
         raise SafetyRefusal("approval file or mode boundary changed")
+    if not head_file.is_file():
+        raise SafetyRefusal("pull request head file could not be read")
+    before_sha = _sha256_file(base_file) if base_file is not None else None
+    after_sha = _sha256_file(head_file)
+    if approval_file.get("before_sha256") != before_sha:
+        raise SafetyRefusal("base file digest changed after approval")
+    if approval_file.get("after_sha256") != after_sha:
+        raise SafetyRefusal("head file digest changed after approval")
+    action = "create" if base_file is None else "replace"
+    patch_digest = object_digest(
+        [
+            {
+                "action": action,
+                "after_sha256": after_sha,
+                "before_sha256": before_sha,
+                "path": ".gitignore",
+            }
+        ]
+    )
+    if approval.get("patch_digest") != patch_digest:
+        raise SafetyRefusal("pull request patch digest changed after approval")
     if not required_checks:
-        raise SafetyRefusal("missing required-check configuration cannot be treated as success")
+        raise SafetyRefusal(
+            "missing required-check configuration cannot be treated as success"
+        )
     states = _check_names(pr)
     missing = sorted(set(required_checks) - set(states))
     if missing:
         raise SafetyRefusal("required checks are missing: " + ", ".join(missing))
-    failed = sorted(name for name in required_checks if states[name] in FAILURE_STATES)
-    pending = sorted(name for name in required_checks if states[name] in PENDING_STATES)
+    failed = sorted(
+        name for name in required_checks if states[name] in FAILURE_STATES
+    )
+    pending = sorted(
+        name for name in required_checks if states[name] in PENDING_STATES
+    )
     unknown = sorted(
         name
         for name in required_checks
@@ -163,50 +216,97 @@ def validate_gate(
     if pending:
         raise SafetyRefusal("required checks are still pending: " + ", ".join(pending))
     if unknown:
-        raise SafetyRefusal("required checks returned unknown states: " + ", ".join(unknown))
+        raise SafetyRefusal(
+            "required checks returned unknown states: " + ", ".join(unknown)
+        )
     return {
         "schema_version": "atlas-gardener/automerge-gate-result/v1",
         "eligible": True,
+        "state": "eligible",
+        "reason": "exact approval, patch and required checks validated",
         "repository": repository,
         "pull_request": pr.get("number"),
         "head_sha": pr.get("headRefOid"),
         "approval_id": approval["approval_id"],
         "remediation_key": approval["remediation_key"],
+        "patch_digest": patch_digest,
         "required_checks": sorted(required_checks),
         "merge_method": "squash",
     }
+
+
+def _write_result(path: Path, result: dict[str, Any]) -> None:
+    path.write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--pr", required=True, type=Path)
     parser.add_argument("--files", required=True, type=Path)
+    parser.add_argument("--base-file", type=Path)
+    parser.add_argument("--head-file", required=True, type=Path)
     parser.add_argument("--policy", required=True, type=Path)
     parser.add_argument("--coverage", required=True, type=Path)
     parser.add_argument("--expected-app-login", required=True)
     parser.add_argument("--required-checks", required=True)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
+    required_checks: list[str] = []
+    pr: dict[str, Any] = {}
     try:
-        required_checks = json.loads(args.required_checks)
-        if not isinstance(required_checks, list) or any(not isinstance(value, str) or not value for value in required_checks):
-            raise SafetyRefusal("required checks must be a JSON array of non-empty names")
+        required_value = json.loads(args.required_checks)
+        if not isinstance(required_value, list) or any(
+            not isinstance(value, str) or not value for value in required_value
+        ):
+            raise SafetyRefusal(
+                "required checks must be a JSON array of non-empty names"
+            )
+        required_checks = sorted(set(required_value))
+        pr_value = load_json(args.pr, "pull request JSON")
+        if not isinstance(pr_value, dict):
+            raise SafetyRefusal("pull request JSON must be an object")
+        pr = pr_value
+        files_value = load_json(args.files, "pull request files JSON")
+        if not isinstance(files_value, list):
+            raise SafetyRefusal("pull request files JSON must be an array")
         result = validate_gate(
-            pr=load_json(args.pr, "pull request JSON"),
-            files=load_json(args.files, "pull request files JSON"),
+            pr=pr,
+            files=files_value,
             policy=read_object(args.policy, label="automation policy"),
             coverage=read_object(args.coverage, label="coverage policy"),
             expected_app_login=args.expected_app_login,
             required_checks=required_checks,
+            base_file=args.base_file,
+            head_file=args.head_file,
         )
     except (GardenerError, OSError, ValueError) as error:
+        result = {
+            "schema_version": "atlas-gardener/automerge-gate-result/v1",
+            "eligible": False,
+            "state": "refused",
+            "reason": str(error)[:240],
+            "repository": os.environ.get("GITHUB_REPOSITORY", "unknown"),
+            "pull_request": pr.get("number"),
+            "head_sha": pr.get("headRefOid"),
+            "required_checks": required_checks,
+        }
+        _write_result(args.output, result)
+        github_output = os.environ.get("GITHUB_OUTPUT")
+        if github_output:
+            with Path(github_output).open("a", encoding="utf-8") as handle:
+                handle.write("eligible=false\n")
+                handle.write("state=refused\n")
         print(f"Gardener auto-merge gate refused: {error}", file=sys.stderr)
         return 2
-    args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_result(args.output, result)
     github_output = os.environ.get("GITHUB_OUTPUT")
     if github_output:
         with Path(github_output).open("a", encoding="utf-8") as handle:
             handle.write("eligible=true\n")
+            handle.write("state=eligible\n")
             handle.write(f"approval_id={result['approval_id']}\n")
             handle.write(f"remediation_key={result['remediation_key']}\n")
     print(json.dumps(result, indent=2, sort_keys=True))
