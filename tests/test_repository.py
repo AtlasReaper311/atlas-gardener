@@ -54,19 +54,45 @@ class RepositoryBaselineTests(unittest.TestCase):
         ):
             self.assertNotIn(value, combined)
 
-        adapter_path = "src/atlas_gardener/github_app_pr.py"
-        self.assertIn(adapter_path, sources)
-        for relative, source in sources.items():
-            if relative != adapter_path:
-                self.assertNotIn("urllib.request", source, relative)
+        allowed_adapters = {
+            "src/atlas_gardener/automatic_github.py",
+            "src/atlas_gardener/github_app_auth.py",
+            "src/atlas_gardener/github_app_pr.py",
+            "src/atlas_gardener/notifications.py",
+        }
+        network_sources = {
+            relative for relative, source in sources.items() if "urllib.request" in source
+        }
+        self.assertEqual(allowed_adapters, network_sources)
 
-        adapter = sources[adapter_path]
-        self.assertIn("urllib.request", adapter)
-        self.assertIn("_allowed_api_operation", adapter)
-        self.assertIn("_MAX_RESPONSE_BYTES", adapter)
-        self.assertIn("timeout=30", adapter)
-        self.assertNotIn("/merge", adapter)
-        self.assertNotIn("/actions/", adapter)
+        app_pr = sources["src/atlas_gardener/github_app_pr.py"]
+        self.assertIn("_allowed_api_operation", app_pr)
+        self.assertIn("_MAX_RESPONSE_BYTES", app_pr)
+        self.assertIn("timeout=30", app_pr)
+        self.assertNotIn("/merge", app_pr)
+        self.assertNotIn("/actions/", app_pr)
+
+        app_auth = sources["src/atlas_gardener/github_app_auth.py"]
+        self.assertIn("RestAppTransport", app_auth)
+        self.assertIn("MAX_RESPONSE_BYTES", app_auth)
+        self.assertIn("timeout=30", app_auth)
+        self.assertNotIn("/pulls/", app_auth)
+        self.assertNotIn("/actions/", app_auth)
+
+        automatic = sources["src/atlas_gardener/automatic_github.py"]
+        self.assertIn("RestControllerTransport", automatic)
+        self.assertIn("MAX_RESPONSE_BYTES", automatic)
+        self.assertIn("timeout=30", automatic)
+        self.assertNotIn("/merge", automatic)
+        self.assertNotIn("/actions/", automatic)
+
+        notifications = sources["src/atlas_gardener/notifications.py"]
+        self.assertIn(
+            'NOTIFY_URL = "https://api.atlas-systems.uk/notify"',
+            notifications,
+        )
+        self.assertIn("timeout=20", notifications)
+        self.assertNotIn("urlopen(payload", notifications)
         self.assertNotIn("X-GitHub-Stateless-S2S-Token", combined)
 
     def test_token_format_probe_is_syntax_checked_and_temporary(self) -> None:
@@ -102,6 +128,7 @@ class RepositoryBaselineTests(unittest.TestCase):
         required = (
             "README.md",
             "LICENSE",
+            "docs/automatic-controller.md",
             "docs/threat-model.md",
             "docs/allowed-fixers.md",
             "docs/adding-a-fixer.md",
@@ -111,6 +138,7 @@ class RepositoryBaselineTests(unittest.TestCase):
             "docs/github-app-pr-adapter.md",
             "docs/github-app-provider-rollout-checklist.md",
             "scripts/check-github-app-token-formats.sh",
+            "scripts/setup-automatic-controller.sh",
         )
         for relative in required:
             self.assertTrue((ROOT / relative).is_file(), relative)
