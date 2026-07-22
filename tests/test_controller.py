@@ -16,12 +16,18 @@ class ControllerTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.infra = Path(os.environ["ATLAS_GARDENER_INFRA_ROOT"]).resolve()
 
-    def environment(self, mode: str, gate: str = "disabled"):
+    def environment(
+        self,
+        mode: str,
+        gate: str = "disabled",
+        targets: str = "[]",
+    ):
         return mock.patch.dict(
             os.environ,
             {
                 "ATLAS_GARDENER_MODE": mode,
                 "ATLAS_GARDENER_WRITE_GATE": gate,
+                "ATLAS_GARDENER_WRITE_TARGETS_JSON": targets,
                 "GITHUB_RUN_ID": "100",
                 "GITHUB_RUN_ATTEMPT": "1",
                 "GITHUB_REPOSITORY": "AtlasReaper311/atlas-gardener",
@@ -66,6 +72,19 @@ class ControllerTests(unittest.TestCase):
                         attestation_verified=False,
                     )
 
+    def test_write_mode_without_explicit_targets_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with self.environment("pr-only", "enabled"):
+                with self.assertRaisesRegex(SafetyRefusal, "cannot be empty"):
+                    run_controller(
+                        infra_root=self.infra,
+                        bundle_path=None,
+                        output_path=root / "evidence.json",
+                        work_root=root / "work",
+                        attestation_verified=False,
+                    )
+
     def test_non_disabled_mode_requires_bundle_and_attestation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -88,6 +107,74 @@ class ControllerTests(unittest.TestCase):
                         work_root=root / "work",
                         attestation_verified=False,
                     )
+
+    def test_unlisted_repository_is_skipped_before_checkout_or_token(self) -> None:
+        authority = "a" * 40
+        finding = {
+            "fingerprint": "sha256:" + "b" * 64,
+            "rule_id": "macos-metadata-ignore",
+            "subject": {"repository": "AtlasReaper311/status"},
+        }
+        validated_bundle = {
+            "bundle_digest": "sha256:" + "c" * 64,
+            "authority_commit": authority,
+            "producer": "AtlasReaper311/atlas-dep-audit",
+            "source_workflow": ".github/workflows/audit.yml",
+            "source_run_id": "200",
+            "source_run_attempt": 1,
+            "source_commit": "d" * 40,
+            "repository_snapshots": [],
+            "findings": [finding],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = root / "bundle.json"
+            bundle.write_text("{}\n", encoding="utf-8")
+            with self.environment(
+                "pr-only",
+                "enabled",
+                '["AtlasReaper311/atlas-dora"]',
+            ):
+                with mock.patch(
+                    "atlas_gardener.controller._git", return_value=authority
+                ), mock.patch(
+                    "atlas_gardener.controller.validate_bundle",
+                    return_value=validated_bundle,
+                ), mock.patch(
+                    "atlas_gardener.controller.coverage_classifications",
+                    return_value={},
+                ), mock.patch(
+                    "atlas_gardener.controller._checkout_target"
+                ) as checkout, mock.patch(
+                    "atlas_gardener.controller.mint_repository_token"
+                ) as mint, mock.patch(
+                    "atlas_gardener.controller.send_notification",
+                    return_value={"status": "sent"},
+                ):
+                    result = run_controller(
+                        infra_root=self.infra,
+                        bundle_path=bundle,
+                        output_path=root / "evidence.json",
+                        work_root=root / "work",
+                        attestation_verified=True,
+                    )
+
+            checkout.assert_not_called()
+            mint.assert_not_called()
+            self.assertEqual([], result["proposals"])
+            self.assertEqual([], result["plans"])
+            self.assertEqual([], result["pull_requests"])
+            self.assertEqual([], result["tokens"])
+            self.assertEqual(
+                [
+                    {
+                        "finding_fingerprint": finding["fingerprint"],
+                        "repository": "AtlasReaper311/status",
+                        "reason": "repository is outside explicit write target scope",
+                    }
+                ],
+                result["repositories_skipped"],
+            )
 
 
 if __name__ == "__main__":
