@@ -85,6 +85,7 @@ jobs:
           PY
           python3 .atlas-infra/scripts/validate_gardener_automation.py --quiet
           python3 -m py_compile \
+            .atlas-gardener/scripts/build_gardener_file_evidence.py \
             .atlas-gardener/scripts/gardener_automerge_gate.py \
             .atlas-gardener/scripts/gardener_gate_marker.py
 
@@ -162,38 +163,38 @@ jobs:
             esac
           done
 
+      - name: Check out exact target base evidence
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .gardener-target-base
+          sparse-checkout: .gitignore
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Check out exact target head evidence
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: .gardener-target-head
+          sparse-checkout: .gitignore
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Capture exact changed files and file bytes
         id: files
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          gh api \
-            --paginate \
-            --slurp \
-            "/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" \
-            --jq 'add' \
-            > /tmp/gardener-files.json
-
-          BASE_SHA=$(python3 -c 'import json; print(json.load(open("/tmp/gardener-pr.json"))["baseRefOid"])')
-          HEAD_SHA=$(python3 -c 'import json; print(json.load(open("/tmp/gardener-pr.json"))["headRefOid"])')
-
-          gh api \
-            -H "Accept: application/vnd.github.raw+json" \
-            "/repos/${GITHUB_REPOSITORY}/contents/.gitignore?ref=${HEAD_SHA}" \
-            > /tmp/gardener-head-gitignore
-
-          if gh api \
-            -H "Accept: application/vnd.github.raw+json" \
-            "/repos/${GITHUB_REPOSITORY}/contents/.gitignore?ref=${BASE_SHA}" \
-            > /tmp/gardener-base-gitignore 2>/dev/null
-          then
-            printf 'base_file=%s\n' '/tmp/gardener-base-gitignore' >> "$GITHUB_OUTPUT"
-          else
-            rm -f /tmp/gardener-base-gitignore
-            printf 'base_file=%s\n' '' >> "$GITHUB_OUTPUT"
-          fi
+          python3 .atlas-gardener/scripts/build_gardener_file_evidence.py \
+            --pr /tmp/gardener-pr.json \
+            --base-root .gardener-target-base \
+            --head-root .gardener-target-head \
+            --files-output /tmp/gardener-files.json \
+            --base-output /tmp/gardener-base-gitignore \
+            --head-output /tmp/gardener-head-gitignore \
+            --gate-result-output /tmp/gardener-gate-result.json
 
       - name: Revalidate the automatic approval
         id: gate
