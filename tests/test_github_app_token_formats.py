@@ -16,11 +16,11 @@ class GitHubAppTokenFormatTests(unittest.TestCase):
         transport = FakeTransport(base_sha=plan["base_sha"])
         token = (
             "ghs_1234567890_"
-            + ("A" * 180)
+            + ("A" * 190)
             + "."
-            + ("B" * 160)
+            + ("B" * 165)
             + "."
-            + ("C" * 160)
+            + ("C" * 165)
         )
 
         result = apply_pr_plan(
@@ -39,7 +39,7 @@ class GitHubAppTokenFormatTests(unittest.TestCase):
     def test_environment_reader_preserves_long_token_without_introspection(self) -> None:
         token = (
             "ghs_9876543210_"
-            + ("x" * 170)
+            + ("x" * 180)
             + "."
             + ("y" * 170)
             + "."
@@ -51,6 +51,7 @@ class GitHubAppTokenFormatTests(unittest.TestCase):
             {"ATLAS_GARDENER_INSTALLATION_TOKEN": token},
             clear=False,
         ):
+            self.assertGreaterEqual(len(token), 520)
             self.assertEqual(token, installation_token_from_environment())
 
 
