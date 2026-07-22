@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import os
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -29,7 +31,34 @@ class AutomergeGateTests(unittest.TestCase):
         )
         cls.now = datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc)
 
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        root = Path(self.directory.name)
+        self.base_file = root / "base.gitignore"
+        self.head_file = root / "head.gitignore"
+        self.base_file.write_text("node_modules/\n", encoding="utf-8")
+        self.head_file.write_text("node_modules/\n.DS_Store\n", encoding="utf-8")
+
+    def tearDown(self) -> None:
+        self.directory.cleanup()
+
+    @staticmethod
+    def file_sha(path: Path) -> str:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
     def approval(self) -> dict:
+        before_sha = self.file_sha(self.base_file)
+        after_sha = self.file_sha(self.head_file)
+        patch_digest = object_digest(
+            [
+                {
+                    "action": "replace",
+                    "after_sha256": after_sha,
+                    "before_sha256": before_sha,
+                    "path": ".gitignore",
+                }
+            ]
+        )
         return {
             "schema_version": "atlas-control-plane/gardener-automation-approval/v1",
             "approval_id": "approval:sha256:" + "1" * 64,
@@ -56,11 +85,11 @@ class AutomergeGateTests(unittest.TestCase):
                 {
                     "path": ".gitignore",
                     "mode": "100644",
-                    "before_sha256": "a" * 64,
-                    "after_sha256": "b" * 64,
+                    "before_sha256": before_sha,
+                    "after_sha256": after_sha,
                 }
             ],
-            "patch_digest": "sha256:" + "c" * 64,
+            "patch_digest": patch_digest,
             "risk_class": "low",
             "mode": "automerge-low-risk",
             "source_run": {
@@ -125,6 +154,8 @@ class AutomergeGateTests(unittest.TestCase):
                 coverage=self.coverage,
                 expected_app_login="atlas-gardener[bot]",
                 required_checks=["CI", "Estate policy"] if checks is None else checks,
+                base_file=self.base_file,
+                head_file=self.head_file,
                 now=self.now,
             )
         finally:
@@ -138,6 +169,7 @@ class AutomergeGateTests(unittest.TestCase):
         self.assertTrue(result["eligible"])
         self.assertEqual("squash", result["merge_method"])
         self.assertEqual(["CI", "Estate policy"], result["required_checks"])
+        self.assertEqual(self.approval()["patch_digest"], result["patch_digest"])
 
     def test_missing_checks_never_count_as_success(self) -> None:
         pr = self.pr()
