@@ -1,0 +1,131 @@
+name: Atlas Gardener controller
+
+on:
+  schedule:
+    - cron: "15 10 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  attestations: read
+
+concurrency:
+  group: atlas-gardener-controller
+  cancel-in-progress: false
+
+jobs:
+  controller:
+    name: Validate and reconcile remediation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ATLAS_GARDENER_MODE: ${{ vars.ATLAS_GARDENER_MODE || 'disabled' }}
+      ATLAS_GARDENER_WRITE_GATE: ${{ vars.ATLAS_GARDENER_WRITE_GATE || 'disabled' }}
+      AUTHORITY_SHA: 2a2a7f921fa39e6d660f472ba6b5dbbdfb09bc27
+      BUNDLE_PATH: ${{ github.workspace }}/controller-input/gardener-findings.json
+      EVIDENCE_PATH: ${{ github.workspace }}/controller-evidence/controller.json
+      WORK_ROOT: ${{ github.workspace }}/controller-work
+    steps:
+      - name: Check out Atlas Gardener
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
+
+      - name: Check out reviewed Atlas Infra authority
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
+        with:
+          repository: AtlasReaper311/atlas-infra
+          ref: 2a2a7f921fa39e6d660f472ba6b5dbbdfb09bc27
+          path: .atlas-infra
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0, Node 24
+        with:
+          python-version: "3.12"
+
+      - name: Validate source and reviewed authority
+        env:
+          ATLAS_GARDENER_CONTRACTS: ${{ github.workspace }}/.atlas-infra/contracts/v1
+        run: |
+          set -euo pipefail
+          python3 -m compileall -q src tests scripts
+          PYTHONPATH=src python3 -m unittest discover -s tests -v
+          python3 .atlas-infra/scripts/validate_gardener_automation.py --quiet
+          test "$(git -C .atlas-infra rev-parse HEAD)" = "$AUTHORITY_SHA"
+
+      - name: Validate controller mode
+        id: mode
+        run: |
+          set -euo pipefail
+          case "$ATLAS_GARDENER_MODE" in
+            disabled|observe|pr-only|automerge-low-risk)
+              ;;
+            *)
+              printf 'Unknown ATLAS_GARDENER_MODE: %s\n' "$ATLAS_GARDENER_MODE" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$ATLAS_GARDENER_MODE" = "pr-only" ] || [ "$ATLAS_GARDENER_MODE" = "automerge-low-risk" ]; then
+            test "$ATLAS_GARDENER_WRITE_GATE" = "enabled"
+          fi
+          printf 'mode=%s\n' "$ATLAS_GARDENER_MODE" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch the latest public Finding bundle
+        if: steps.mode.outputs.mode != 'disabled'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$BUNDLE_PATH")"
+          gh api \
+            -H "Accept: application/vnd.github.raw+json" \
+            "/repos/AtlasReaper311/atlas-dep-audit/contents/gardener-findings.json?ref=gardener-findings" \
+            > "$BUNDLE_PATH"
+
+      - name: Verify Finding bundle attestation
+        id: attestation
+        if: steps.mode.outputs.mode != 'disabled'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh attestation verify "$BUNDLE_PATH" \
+            --repo AtlasReaper311/atlas-dep-audit
+          printf 'verified=true\n' >> "$GITHUB_OUTPUT"
+
+      - name: Run default-disabled controller
+        if: steps.mode.outputs.mode == 'disabled'
+        env:
+          ATLAS_GARDENER_CONTRACTS: ${{ github.workspace }}/.atlas-infra/contracts/v1
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$EVIDENCE_PATH")"
+          PYTHONPATH=src python3 -m atlas_gardener controller \
+            --infra-root .atlas-infra \
+            --output "$EVIDENCE_PATH" \
+            --work-root "$WORK_ROOT"
+
+      - name: Run attested controller
+        if: steps.mode.outputs.mode != 'disabled'
+        env:
+          ATLAS_GARDENER_APP_ID: ${{ vars.ATLAS_GARDENER_APP_ID }}
+          ATLAS_GARDENER_APP_PRIVATE_KEY: ${{ secrets.ATLAS_GARDENER_APP_PRIVATE_KEY }}
+          ATLAS_GARDENER_CONTRACTS: ${{ github.workspace }}/.atlas-infra/contracts/v1
+          NOTIFY_TOKEN: ${{ secrets.NOTIFY_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$EVIDENCE_PATH")"
+          PYTHONPATH=src python3 -m atlas_gardener controller \
+            --infra-root .atlas-infra \
+            --bundle "$BUNDLE_PATH" \
+            --attestation-verified \
+            --output "$EVIDENCE_PATH" \
+            --work-root "$WORK_ROOT"
+
+      - name: Upload bounded controller evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: atlas-gardener-controller-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.EVIDENCE_PATH }}
+          if-no-files-found: error
+          retention-days: 30
