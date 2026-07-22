@@ -26,6 +26,7 @@ from atlas_gardener.github_app_pr import (
     installation_token_from_environment,
     plan_summary,
     validate_pr_plan,
+    verify_apply_repository,
 )
 from atlas_gardener.safety import MAX_CHANGED_FILES, MAX_CHANGED_LINES
 
@@ -111,6 +112,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="review or open one draft PR from an exact GitHub App PR plan",
     )
     app_pr_parser.add_argument("--plan", required=True, type=_path)
+    app_pr_parser.add_argument(
+        "--repo",
+        type=_path,
+        help="clean exact target checkout; required with --apply",
+    )
     app_pr_parser.add_argument("--approved-plan-digest")
     app_pr_mode = app_pr_parser.add_mutually_exclusive_group()
     app_pr_mode.add_argument(
@@ -226,7 +232,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 pins_file=args.pins_file,
             )
             write_json(args.output, plan)
-            print(json.dumps(plan_summary(plan), ensure_ascii=False, sort_keys=True, indent=2))
+            print(
+                json.dumps(
+                    plan_summary(plan), ensure_ascii=False, sort_keys=True, indent=2
+                )
+            )
             print(f"exact GitHub App PR plan written: {args.output}")
             return 0
         if args.command == "github-app-pr":
@@ -243,13 +253,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 0
             if not args.approved_plan_digest:
                 raise GardenerError("--apply requires --approved-plan-digest")
+            if args.repo is None:
+                raise GardenerError("--apply requires --repo for classification revalidation")
             if args.approved_plan_digest != plan["plan_digest"]:
                 raise GardenerError("approved plan digest does not match the reviewed plan")
+            current_classification = verify_apply_repository(plan, args.repo)
             _confirm_github_app_apply(plan, args.approved_plan_digest)
             result = apply_pr_plan(
                 plan,
                 approved_plan_digest=args.approved_plan_digest,
                 token=installation_token_from_environment(),
+                current_classification=current_classification,
             )
             print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))
             return 0
@@ -281,6 +295,8 @@ def _doctor(args: argparse.Namespace) -> int:
         "github_app_pr_adapter": {
             "default_mode": "dry-run",
             "apply_network_access": True,
+            "single_commit": True,
+            "workflow_files_supported": False,
             "installation_token_source": "approved external broker via environment",
             "provider_installation_in_scope": False,
             "stop_after": "draft-pull-request",
