@@ -16,34 +16,49 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    env:
+      AUTHORITY_SHA: 2a2a7f921fa39e6d660f472ba6b5dbbdfb09bc27
+      ATLAS_GARDENER_CONTRACTS: ${{ github.workspace }}/.contracts/atlas-infra/contracts/v1
+      ATLAS_GARDENER_INFRA_ROOT: ${{ github.workspace }}/.contracts/atlas-infra
     steps:
       - name: Check out atlas-gardener
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
 
-      - name: Check out authoritative contracts
+      - name: Check out reviewed automation authority
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
         with:
           repository: AtlasReaper311/atlas-infra
+          ref: 2a2a7f921fa39e6d660f472ba6b5dbbdfb09bc27
           path: .contracts/atlas-infra
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0, Node 24
         with:
           python-version: "3.12"
 
+      - name: Verify immutable authority
+        run: |
+          set -euo pipefail
+          test "$(git -C "$ATLAS_GARDENER_INFRA_ROOT" rev-parse HEAD)" = "$AUTHORITY_SHA"
+          python3 "$ATLAS_GARDENER_INFRA_ROOT/scripts/validate_gardener_automation.py" --quiet
+
       - name: Compile
-        run: python -m compileall -q src tests
+        run: python -m compileall -q src tests scripts
 
       - name: Test
-        env:
-          ATLAS_GARDENER_CONTRACTS: ${{ github.workspace }}/.contracts/atlas-infra/contracts/v1
         run: PYTHONPATH=src python -m unittest discover -s tests -v
 
       - name: Doctor
         run: >-
           PYTHONPATH=src python -m atlas_gardener doctor
           --contracts-root .contracts/atlas-infra/contracts/v1
+
+      - name: Validate shell files
+        run: |
+          set -euo pipefail
+          find scripts -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
 
       - name: Check whitespace
         run: git diff --check
