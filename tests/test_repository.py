@@ -1,4 +1,4 @@
-"""Repository baseline, workflow hardening, and no-network surface tests."""
+"""Repository baseline, workflow hardening, and bounded-network surface tests."""
 
 from __future__ import annotations
 
@@ -35,24 +35,37 @@ class RepositoryBaselineTests(unittest.TestCase):
         for line in action_lines:
             self.assertRegex(line, r"@[0-9a-f]{40} # v[0-9]")
 
-    def test_source_has_no_shell_or_http_client_surface(self) -> None:
-        sources = "\n".join(
-            path.read_text(encoding="utf-8")
+    def test_source_has_no_unbounded_shell_or_http_client_surface(self) -> None:
+        sources = {
+            path.relative_to(ROOT).as_posix(): path.read_text(encoding="utf-8")
             for path in sorted((ROOT / "src").rglob("*.py"))
-        )
-        forbidden = (
+        }
+        combined = "\n".join(sources.values())
+        for value in (
             "shell=True",
             "os.system(",
-            "urllib.request",
             "http.client",
             "import requests",
             "from requests",
             "import socket",
             "eval(",
             "exec(",
-        )
-        for value in forbidden:
-            self.assertNotIn(value, sources)
+        ):
+            self.assertNotIn(value, combined)
+
+        adapter_path = "src/atlas_gardener/github_app_pr.py"
+        self.assertIn(adapter_path, sources)
+        for relative, source in sources.items():
+            if relative != adapter_path:
+                self.assertNotIn("urllib.request", source, relative)
+
+        adapter = sources[adapter_path]
+        self.assertIn("urllib.request", adapter)
+        self.assertIn("_allowed_api_operation", adapter)
+        self.assertIn("_MAX_RESPONSE_BYTES", adapter)
+        self.assertIn("timeout=30", adapter)
+        self.assertNotIn("/merge", adapter)
+        self.assertNotIn("/actions/", adapter)
 
     def test_example_finding_matches_authoritative_schema_and_fingerprint(self) -> None:
         finding = read_json(ROOT / "examples" / "finding.workflow-timeout.json")
@@ -74,6 +87,8 @@ class RepositoryBaselineTests(unittest.TestCase):
             "docs/ownership.md",
             "docs/future-github-pr-model.md",
             "docs/runbooks/refusal-and-rollback.md",
+            "docs/github-app-pr-adapter.md",
+            "docs/github-app-provider-rollout-checklist.md",
         )
         for relative in required:
             self.assertTrue((ROOT / relative).is_file(), relative)
