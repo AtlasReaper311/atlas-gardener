@@ -6,13 +6,14 @@ The adapter stops after opening one draft pull request. It cannot approve, merge
 
 ## Source and provider states
 
-The implementation has three separate states:
+The implementation has four separate states:
 
 1. source complete and CI green;
-2. GitHub App created and installed on one selected repository;
-3. one bounded canary draft PR verified.
+2. GitHub App created and installed on selected repositories;
+3. one bounded canary draft PR verified;
+4. additional repository coverage explicitly approved and added.
 
-A merged source PR proves only the first state. It does not create or activate a GitHub App.
+A merged source PR proves only the first state. It does not create or activate a GitHub App. The initial `atlas-dora` canary verified the third state; wider installation coverage remains a separate selected-repository rollout.
 
 ## Build the exact plan
 
@@ -46,10 +47,11 @@ Unknown classification fails closed. Private repositories use source-owned `.atl
 ```bash
 atlas-gardener github-app-pr \
   --plan /tmp/github-app-pr-plan.json \
+  --result-output /tmp/github-app-pr-summary.json \
   --dry-run
 ```
 
-The summary contains identities, hashes, risk, expiry, target classification fingerprint, permission requirements, and file paths. It omits file contents and credentials.
+The summary contains identities, hashes, risk, expiry, target classification fingerprint, permission requirements, and file paths. It omits file contents and credentials. `--result-output` writes one pure JSON document for `jq` and other machine consumers; human-readable prompts are not mixed into that receipt.
 
 ## Apply gate
 
@@ -69,10 +71,34 @@ atlas-gardener github-app-pr \
   --plan /tmp/github-app-pr-plan.json \
   --repo ~/Personal/example-repository \
   --approved-plan-digest sha256:<reviewed-digest> \
+  --result-output /tmp/github-app-pr-result.json \
   --apply
 ```
 
 Do not put the token in the command, repository, issue, pull request, chat, or shell history.
+
+## Installation token compatibility
+
+Installation tokens are treated as opaque bearer strings. Gardener does not impose a maximum or exact token length, decode a token payload, depend on a fixed dot count during normal operation, or persist the token. This supports both classic opaque `ghs_` values and GitHub's longer stateless `ghs_` JWT-format values.
+
+Before expanding an App installation, verify both formats against one already-approved repository:
+
+```bash
+bash scripts/check-github-app-token-formats.sh \
+  AtlasReaper311/atlas-dora
+```
+
+The compatibility probe:
+
+- forces one stateless token with GitHub's temporary per-request override;
+- forces one classic token with the corresponding temporary override;
+- restricts each token to the named repository and the exact Gardener permissions;
+- authenticates one read-only repository request with each token;
+- prints only token length and format classification, never the token;
+- revokes each token immediately;
+- leaves routine token minting without the temporary override header.
+
+The override header is a migration test mechanism, not a permanent production dependency.
 
 ## Permission contract
 
@@ -123,6 +149,6 @@ The generated pull request body records:
 - rollback instructions;
 - an explicit statement that no approval, merge, deployment, workflow dispatch, settings change, secret action, or non-GitHub provider mutation occurred.
 
-## Provider rollout remains separate
+## Provider coverage remains separate
 
-A later owner-approved provider rollout must create the GitHub App, limit installation to one canary repository, keep private-key custody outside Gardener, mint one short-lived installation token, and verify one draft PR against the provider rollout checklist.
+The verified `atlas-dora` canary proves the bounded write path. Adding more repositories to the App installation must still use GitHub's selected-repository mode, derive eligibility from current authoritative classification, preserve the exact permission contract, and leave each proposed change behind the same plan review and confirmation gates.

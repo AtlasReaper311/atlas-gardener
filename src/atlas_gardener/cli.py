@@ -7,7 +7,7 @@ import json
 import shutil
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from atlas_gardener import __version__
 from atlas_gardener.contracts import (
@@ -33,6 +33,14 @@ from atlas_gardener.safety import MAX_CHANGED_FILES, MAX_CHANGED_LINES
 
 def _path(value: str) -> Path:
     return Path(value).expanduser()
+
+
+def _emit_json_result(result: dict[str, Any], output: Path | None = None) -> None:
+    """Print one JSON result and optionally write a parse-safe receipt file."""
+
+    if output is not None:
+        write_json(output, result)
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -118,6 +126,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="clean exact target checkout; required with --apply",
     )
     app_pr_parser.add_argument("--approved-plan-digest")
+    app_pr_parser.add_argument(
+        "--result-output",
+        type=_path,
+        help="write the structured summary or apply result as pure JSON",
+    )
     app_pr_mode = app_pr_parser.add_mutually_exclusive_group()
     app_pr_mode.add_argument(
         "--dry-run", action="store_true", help="verify and summarize only; default"
@@ -242,14 +255,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "github-app-pr":
             plan = validate_pr_plan(read_json(args.plan.resolve(strict=True)))
             if not args.apply:
-                print(
-                    json.dumps(
-                        plan_summary(plan),
-                        ensure_ascii=False,
-                        sort_keys=True,
-                        indent=2,
-                    )
-                )
+                _emit_json_result(plan_summary(plan), args.result_output)
                 return 0
             if not args.approved_plan_digest:
                 raise GardenerError("--apply requires --approved-plan-digest")
@@ -265,7 +271,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 token=installation_token_from_environment(),
                 current_classification=current_classification,
             )
-            print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))
+            _emit_json_result(result, args.result_output)
             return 0
     except (GardenerError, OSError, ValueError) as error:
         print(f"atlas-gardener: refused: {error}", file=sys.stderr)

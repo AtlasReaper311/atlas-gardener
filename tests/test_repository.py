@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import tomllib
 import unittest
 
@@ -66,6 +67,26 @@ class RepositoryBaselineTests(unittest.TestCase):
         self.assertIn("timeout=30", adapter)
         self.assertNotIn("/merge", adapter)
         self.assertNotIn("/actions/", adapter)
+        self.assertNotIn("X-GitHub-Stateless-S2S-Token", combined)
+
+    def test_token_format_probe_is_syntax_checked_and_temporary(self) -> None:
+        script_path = ROOT / "scripts" / "check-github-app-token-formats.sh"
+        script = script_path.read_text(encoding="utf-8")
+        completed = subprocess.run(
+            ["bash", "-n", str(script_path)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        self.assertEqual(0, completed.returncode, completed.stderr)
+        self.assertIn("X-GitHub-Stateless-S2S-Token: ${override}", script)
+        self.assertIn('mint_and_probe "enabled" "2" "stateless"', script)
+        self.assertIn('mint_and_probe "disabled" "0" "classic"', script)
+        self.assertIn(
+            "Routine token minting should omit the temporary override header.", script
+        )
 
     def test_example_finding_matches_authoritative_schema_and_fingerprint(self) -> None:
         finding = read_json(ROOT / "examples" / "finding.workflow-timeout.json")
@@ -89,13 +110,14 @@ class RepositoryBaselineTests(unittest.TestCase):
             "docs/runbooks/refusal-and-rollback.md",
             "docs/github-app-pr-adapter.md",
             "docs/github-app-provider-rollout-checklist.md",
+            "scripts/check-github-app-token-formats.sh",
         )
         for relative in required:
             self.assertTrue((ROOT / relative).is_file(), relative)
 
     def test_text_files_have_final_newlines_and_no_trailing_whitespace(self) -> None:
         text_names = {".gitignore", "LICENSE", "README.md"}
-        text_suffixes = {".json", ".md", ".py", ".toml", ".yml", ".yaml"}
+        text_suffixes = {".json", ".md", ".py", ".sh", ".toml", ".yml", ".yaml"}
         for path in sorted(ROOT.rglob("*")):
             if not path.is_file() or ".git" in path.parts or ".contracts" in path.parts:
                 continue
