@@ -47,8 +47,30 @@ jobs:
       - name: Compile
         run: python -m compileall -q src tests scripts
 
-      - name: Test
-        run: PYTHONPATH=src python -m unittest discover -s tests -v
+      - name: Run repository-isolated tests
+        run: |
+          set -euo pipefail
+          for path in tests/test_*.py
+          do
+            module="$(basename "$path" .py)"
+            case "$module" in
+              test_automation|test_automerge_gate|test_controller)
+                continue
+                ;;
+            esac
+            PYTHONPATH=src:tests python -m unittest "$module" -v
+          done
+
+      - name: Run authority-dependent controller tests
+        env:
+          ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
+        run: |
+          set -euo pipefail
+          PYTHONPATH=src:tests python -m unittest \
+            test_automation \
+            test_automerge_gate \
+            test_controller \
+            -v
 
       - name: Doctor
         run: >-
