@@ -120,7 +120,7 @@ class AutomergeGateTests(unittest.TestCase):
             "state": "OPEN",
             "isDraft": False,
             "body": approval_marker(approval),
-            "author": {"login": "atlas-gardener[bot]"},
+            "author": {"is_bot": True, "login": "app/atlas-gardener"},
             "headRefName": "gardener/macos-metadata-ignore-123456789abc",
             "headRefOid": approval["expected_head_sha"],
             "baseRefName": "main",
