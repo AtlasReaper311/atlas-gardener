@@ -110,7 +110,7 @@ class AutomergeGateTests(unittest.TestCase):
                 "status": "modified",
                 "additions": 1,
                 "deletions": 0,
-                "patch": "@@ -1 +1,3 @@\n node_modules/\n+\n+.DS_Store",
+                "patch": "@@ -1 +1,2 @@\n node_modules/\n+.DS_Store",
             }
         ]
 
@@ -120,11 +120,11 @@ class AutomergeGateTests(unittest.TestCase):
         try:
             return GATE.validate_gate(
                 pr=pr or self.pr(),
-                files=files or self.files(),
+                files=self.files() if files is None else files,
                 policy=self.policy,
                 coverage=self.coverage,
                 expected_app_login="atlas-gardener[bot]",
-                required_checks=checks or ["CI", "Estate policy"],
+                required_checks=["CI", "Estate policy"] if checks is None else checks,
                 now=self.now,
             )
         finally:
