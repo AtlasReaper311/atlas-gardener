@@ -66,20 +66,20 @@ jobs:
             fi
           done
 
-      - name: Run authority-dependent controller tests
+      - name: Test automation policy and bundle logic
         env:
           ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
-        run: |
-          set -euo pipefail
-          if ! PYTHONPATH=src:tests python -m unittest \
-            test_automation \
-            test_automerge_gate \
-            test_controller \
-            -v > /tmp/atlas-gardener-authority-tests.log 2>&1
-          then
-            cat /tmp/atlas-gardener-authority-tests.log
-            exit 1
-          fi
+        run: PYTHONPATH=src:tests python -m unittest test_automation -v
+
+      - name: Test target-owned auto-merge gate
+        env:
+          ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
+        run: PYTHONPATH=src:tests python -m unittest test_automerge_gate -v
+
+      - name: Test automatic controller modes
+        env:
+          ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
+        run: PYTHONPATH=src:tests python -m unittest test_controller -v
 
       - name: Doctor
         run: >-
