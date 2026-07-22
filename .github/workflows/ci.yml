@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      AUTHORITY_SHA: 67fc27b66cb1a47951d1d649650130f7d3586ca2
+      AUTHORITY_SHA: 6689de2c7ccd9264348c75bed99745021f88f191
       ATLAS_GARDENER_CONTRACTS: ${{ github.workspace }}/.contracts/atlas-infra/contracts/v1
       ATLAS_GARDENER_TEST_INFRA_ROOT: ${{ github.workspace }}/.contracts/atlas-infra
     steps:
@@ -29,7 +29,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
         with:
           repository: AtlasReaper311/atlas-infra
-          ref: 67fc27b66cb1a47951d1d649650130f7d3586ca2
+          ref: 6689de2c7ccd9264348c75bed99745021f88f191
           path: .contracts/atlas-infra
           persist-credentials: false
 
@@ -55,7 +55,7 @@ jobs:
           do
             module="$(basename "$path" .py)"
             case "$module" in
-              test_automation|test_automerge_gate|test_controller)
+              test_automation|test_automerge_gate|test_controller|test_write_targets)
                 continue
                 ;;
             esac
@@ -70,6 +70,11 @@ jobs:
         env:
           ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
         run: PYTHONPATH=src:tests python -m unittest test_automation -v
+
+      - name: Test write-target scope
+        env:
+          ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
+        run: PYTHONPATH=src:tests python -m unittest test_write_targets -v
 
       - name: Gate accepts exact low-risk success
         env:
