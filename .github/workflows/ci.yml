@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      AUTHORITY_SHA: fce3ec36fff7a9fe72766405a86b78df0dfaf06d
+      AUTHORITY_SHA: 70f8e3867e92e28305fde22b41705a6eb46bd9f1
       ATLAS_GARDENER_CONTRACTS: ${{ github.workspace }}/.contracts/atlas-infra/contracts/v1
       ATLAS_GARDENER_TEST_INFRA_ROOT: ${{ github.workspace }}/.contracts/atlas-infra
     steps:
@@ -29,7 +29,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
         with:
           repository: AtlasReaper311/atlas-infra
-          ref: fce3ec36fff7a9fe72766405a86b78df0dfaf06d
+          ref: 70f8e3867e92e28305fde22b41705a6eb46bd9f1
           path: .contracts/atlas-infra
           persist-credentials: false
 
@@ -70,7 +70,16 @@ jobs:
             test_automation \
             test_automerge_gate \
             test_controller \
-            -v
+            -v > /tmp/atlas-gardener-authority-tests.log 2>&1
+
+      - name: Upload failing authority test output
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: atlas-gardener-authority-test-output
+          path: /tmp/atlas-gardener-authority-tests.log
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Doctor
         run: >-
