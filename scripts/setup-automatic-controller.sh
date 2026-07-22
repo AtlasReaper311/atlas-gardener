@@ -86,7 +86,7 @@ gh secret set NOTIFY_TOKEN --repo "${GARDENER_REPOSITORY}"
 
 printf 'PASS: controller secrets stored through interactive prompts\n'
 
-# PART 3 // Install the kill switch in its safe state
+# PART 3 // Install the kill switches in their safe state
 
 printf '\nPART 3 // Set disabled controller state\n'
 
@@ -94,7 +94,9 @@ gh variable set ATLAS_GARDENER_MODE --repo "${GARDENER_REPOSITORY}" --body "disa
 
 gh variable set ATLAS_GARDENER_WRITE_GATE --repo "${GARDENER_REPOSITORY}" --body "disabled"
 
-printf 'PASS: controller mode and write gate are disabled\n'
+gh variable set ATLAS_GARDENER_WRITE_TARGETS_JSON --repo "${GARDENER_REPOSITORY}" --body "[]"
+
+printf 'PASS: controller mode, write gate, and write targets are disabled\n'
 
 # PART 4 // Manual GitHub dashboard actions after separate rollout approval
 #
@@ -107,7 +109,8 @@ printf 'PASS: controller mode and write gate are disabled\n'
 # 5. Enable GitHub native auto-merge only on the approved canary repository.
 # 6. Confirm the target caller pins immutable merged atlas-infra and atlas-gardener commits.
 # 7. Confirm required_checks_json exactly matches the target repository's required CI checks.
-# 8. Move through disabled, observe, pr-only, and automerge-low-risk as separate rollout stages.
+# 8. Set ATLAS_GARDENER_WRITE_TARGETS_JSON to the exact sorted approved repository list.
+# 9. Move through disabled, observe, pr-only, and automerge-low-risk as separate rollout stages.
 
 # PART 5 // Verification
 
@@ -125,8 +128,14 @@ CURRENT_GATE="$(gh variable get ATLAS_GARDENER_WRITE_GATE --repo "${GARDENER_REP
 
 test "${CURRENT_GATE}" = "disabled" || fail "controller write gate is not disabled"
 
+CURRENT_TARGETS="$(gh variable get ATLAS_GARDENER_WRITE_TARGETS_JSON --repo "${GARDENER_REPOSITORY}")"
+
+test "${CURRENT_TARGETS}" = "[]" || fail "controller write targets are not empty"
+
 unset CURRENT_MODE
 
 unset CURRENT_GATE
+
+unset CURRENT_TARGETS
 
 printf '\nSOURCE SETUP COMPLETE: credentials are stored and all runtime writes remain disabled.\n'
