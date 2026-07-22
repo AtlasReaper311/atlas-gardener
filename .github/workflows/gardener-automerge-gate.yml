@@ -84,7 +84,9 @@ jobs:
               raise SystemExit("required_checks_json must contain non-empty strings")
           PY
           python3 .atlas-infra/scripts/validate_gardener_automation.py --quiet
-          python3 -m py_compile .atlas-gardener/scripts/gardener_automerge_gate.py
+          python3 -m py_compile \
+            .atlas-gardener/scripts/gardener_automerge_gate.py \
+            .atlas-gardener/scripts/gardener_gate_marker.py
 
       - name: Wait for exact required checks
         env:
@@ -121,7 +123,11 @@ jobs:
           }
           success_values = {"SUCCESS", "NEUTRAL"}
           failed = [name for name in required if states.get(name) in failed_values]
-          pending = [name for name in required if name in states and states[name] not in success_values | failed_values]
+          pending = [
+              name
+              for name in required
+              if name in states and states[name] not in success_values | failed_values
+          ]
           if failed:
               print("failed")
           elif missing or pending:
@@ -136,24 +142,28 @@ jobs:
                 break
                 ;;
               failed)
-                echo "A required target check failed."
+                printf '%s\n' '{"eligible":false,"reason":"required target CI failed","state":"refused"}' \
+                  > /tmp/gardener-gate-result.json
                 exit 1
                 ;;
               pending)
                 if [ "$attempt" -eq 60 ]; then
-                  echo "Required target checks did not complete within the bounded wait."
+                  printf '%s\n' '{"eligible":false,"reason":"required target CI did not complete within the bounded wait","state":"refused"}' \
+                    > /tmp/gardener-gate-result.json
                   exit 1
                 fi
                 sleep 15
                 ;;
               *)
-                echo "Unknown required-check state: $CHECK_STATE"
+                printf '%s\n' '{"eligible":false,"reason":"required target CI returned an unknown state","state":"refused"}' \
+                  > /tmp/gardener-gate-result.json
                 exit 1
                 ;;
             esac
           done
 
-      - name: Capture the exact changed-file set
+      - name: Capture exact changed files and file bytes
+        id: files
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -166,21 +176,74 @@ jobs:
             --jq 'add' \
             > /tmp/gardener-files.json
 
+          BASE_SHA=$(python3 -c 'import json; print(json.load(open("/tmp/gardener-pr.json"))["baseRefOid"])')
+          HEAD_SHA=$(python3 -c 'import json; print(json.load(open("/tmp/gardener-pr.json"))["headRefOid"])')
+
+          gh api \
+            -H "Accept: application/vnd.github.raw+json" \
+            "/repos/${GITHUB_REPOSITORY}/contents/.gitignore?ref=${HEAD_SHA}" \
+            > /tmp/gardener-head-gitignore
+
+          if gh api \
+            -H "Accept: application/vnd.github.raw+json" \
+            "/repos/${GITHUB_REPOSITORY}/contents/.gitignore?ref=${BASE_SHA}" \
+            > /tmp/gardener-base-gitignore 2>/dev/null
+          then
+            printf 'base_file=%s\n' '/tmp/gardener-base-gitignore' >> "$GITHUB_OUTPUT"
+          else
+            rm -f /tmp/gardener-base-gitignore
+            printf 'base_file=%s\n' '' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Revalidate the automatic approval
         id: gate
         env:
+          BASE_FILE: ${{ steps.files.outputs.base_file }}
           EXPECTED_APP_LOGIN: ${{ inputs.expected_app_login }}
           REQUIRED_CHECKS_JSON: ${{ inputs.required_checks_json }}
         run: |
           set -euo pipefail
-          PYTHONPATH=.atlas-gardener/src python3 .atlas-gardener/scripts/gardener_automerge_gate.py \
-            --pr /tmp/gardener-pr.json \
-            --files /tmp/gardener-files.json \
-            --policy .atlas-infra/policy/gardener-automation.json \
-            --coverage .atlas-infra/policy/gardener-github-app-coverage.json \
-            --expected-app-login "$EXPECTED_APP_LOGIN" \
-            --required-checks "$REQUIRED_CHECKS_JSON" \
+          ARGS=(
+            --pr /tmp/gardener-pr.json
+            --files /tmp/gardener-files.json
+            --head-file /tmp/gardener-head-gitignore
+            --policy .atlas-infra/policy/gardener-automation.json
+            --coverage .atlas-infra/policy/gardener-github-app-coverage.json
+            --expected-app-login "$EXPECTED_APP_LOGIN"
+            --required-checks "$REQUIRED_CHECKS_JSON"
             --output /tmp/gardener-gate-result.json
+          )
+          if [ -n "$BASE_FILE" ]; then
+            ARGS+=(--base-file "$BASE_FILE")
+          fi
+          PYTHONPATH=.atlas-gardener/src \
+            python3 .atlas-gardener/scripts/gardener_automerge_gate.py "${ARGS[@]}"
+
+      - name: Record machine-readable target gate outcome
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          REQUIRED_CHECKS_JSON: ${{ inputs.required_checks_json }}
+        run: |
+          set -euo pipefail
+          if [ ! -s /tmp/gardener-pr.json ]; then
+            gh pr view "$PR_URL" \
+              --json number,state,isDraft,body,author,headRefName,headRefOid,baseRefName,baseRefOid,commits,statusCheckRollup \
+              > /tmp/gardener-pr.json
+          fi
+          if [ ! -s /tmp/gardener-gate-result.json ]; then
+            printf '%s\n' '{"eligible":false,"reason":"target gate failed before detailed validation","state":"refused"}' \
+              > /tmp/gardener-gate-result.json
+          fi
+          PYTHONPATH=.atlas-gardener/src \
+            python3 .atlas-gardener/scripts/gardener_gate_marker.py \
+              --pr /tmp/gardener-pr.json \
+              --gate-result /tmp/gardener-gate-result.json \
+              --required-checks "$REQUIRED_CHECKS_JSON" \
+              --output /tmp/gardener-pr-body.md
+          gh pr edit "$PR_URL" --body-file /tmp/gardener-pr-body.md
 
       - name: Enable native squash auto-merge
         if: steps.gate.outputs.eligible == 'true'
