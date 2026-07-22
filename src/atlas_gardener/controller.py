@@ -32,6 +32,7 @@ from atlas_gardener.fixers import fixer_for_finding
 from atlas_gardener.github_app_auth import mint_repository_token, private_key_from_environment
 from atlas_gardener.github_app_pr import _plan_digest, build_pr_plan, validate_pr_plan
 from atlas_gardener.notifications import build_notification, send_notification
+from atlas_gardener.write_targets import resolve_write_targets
 
 
 def _git(command: list[str], *, cwd: Path | None = None) -> str:
@@ -232,6 +233,7 @@ def run_controller(
         label="estate registry",
     )
     mode, write_gate = resolve_mode(policy)
+    write_targets = resolve_write_targets(policy, coverage, mode)
     evidence = new_evidence(mode=mode, policy=policy, coverage=coverage, bundle=None)
     evidence["write_gate_enabled"] = write_gate
     evidence["attestation_verified"] = attestation_verified
@@ -270,6 +272,15 @@ def run_controller(
         fingerprint = finding["fingerprint"]
         repository = finding["subject"]["repository"]
         evidence["finding_fingerprints"].append(fingerprint)
+        if write_targets and repository not in write_targets:
+            evidence["repositories_skipped"].append(
+                {
+                    "finding_fingerprint": fingerprint,
+                    "repository": repository,
+                    "reason": "repository is outside explicit write target scope",
+                }
+            )
+            continue
         fixer_id: str | None = None
         token_record: dict[str, Any] | None = None
         try:
