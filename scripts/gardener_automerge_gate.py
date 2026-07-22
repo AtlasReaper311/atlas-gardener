@@ -41,6 +41,8 @@ FAILURE_STATES = {
     "STALE",
     "TIMED_OUT",
 }
+GITHUB_CLI_APP_PREFIX = "app/"
+GITHUB_BOT_SUFFIX = "[bot]"
 
 
 def load_json(path: Path, label: str) -> Any:
@@ -68,6 +70,25 @@ def _check_names(pr: dict[str, Any]) -> dict[str, str]:
         if isinstance(name, str) and isinstance(state, str):
             result[name] = state.upper()
     return result
+
+
+def _validate_app_author(author: Any, expected_app_login: str) -> None:
+    if not expected_app_login.endswith(GITHUB_BOT_SUFFIX):
+        raise SafetyRefusal("approved Gardener App login must end with [bot]")
+    app_slug = expected_app_login[: -len(GITHUB_BOT_SUFFIX)]
+    if not app_slug or "/" in app_slug:
+        raise SafetyRefusal("approved Gardener App login is invalid")
+
+    # GitHub CLI serialises GraphQL App actors as
+    # {"is_bot": true, "login": "app/<app-slug>"}. The configured identity
+    # remains the canonical REST-style <app-slug>[bot] login used elsewhere.
+    expected_cli_login = f"{GITHUB_CLI_APP_PREFIX}{app_slug}"
+    if (
+        not isinstance(author, dict)
+        or author.get("is_bot") is not True
+        or author.get("login") != expected_cli_login
+    ):
+        raise SafetyRefusal("pull request author is not the approved Gardener App bot")
 
 
 def _patch_added_lines(files: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
@@ -103,9 +124,7 @@ def validate_gate(
     repository = os.environ.get("GITHUB_REPOSITORY") or pr.get("repository")
     if not isinstance(repository, str) or not repository.startswith("AtlasReaper311/"):
         raise SafetyRefusal("target repository identity is unavailable")
-    author = pr.get("author") or {}
-    if author.get("login") != expected_app_login:
-        raise SafetyRefusal("pull request author is not the approved Gardener App bot")
+    _validate_app_author(pr.get("author"), expected_app_login)
     if pr.get("state") != "OPEN" or pr.get("isDraft") is not False:
         raise SafetyRefusal("automatic merge requires an open ready pull request")
     head_branch = pr.get("headRefName")
