@@ -1,4 +1,4 @@
-"""Argparse CLI for offline Atlas Gardener proposal workflows."""
+"""Argparse CLI for offline and automatic Atlas Gardener workflows."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from atlas_gardener.contracts import (
     resolve_contracts_root,
     write_json,
 )
+from atlas_gardener.controller import run_controller
 from atlas_gardener.dependabot_rollout import execute_rollout
 from atlas_gardener.engine import apply_proposal, propose, scan
 from atlas_gardener.errors import GardenerError
@@ -48,7 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="atlas-gardener",
-        description="Prepare safe, deterministic, PR-only remediation proposals.",
+        description="Prepare safe, deterministic Atlas Systems remediation proposals.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -141,6 +142,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="use an externally brokered installation token to open one draft PR",
     )
 
+    controller_parser = commands.add_parser(
+        "controller",
+        help="run the policy-bound scheduled automatic-remediation controller",
+    )
+    controller_parser.add_argument("--infra-root", required=True, type=_path)
+    controller_parser.add_argument("--bundle", type=_path)
+    controller_parser.add_argument("--output", required=True, type=_path)
+    controller_parser.add_argument("--work-root", required=True, type=_path)
+    controller_parser.add_argument(
+        "--attestation-verified",
+        action="store_true",
+        help="assert that the workflow verified the bundle attestation before invocation",
+    )
+
     doctor_parser = commands.add_parser("doctor", help="verify local prerequisites")
     doctor_parser.add_argument("--contracts-root", type=_path)
 
@@ -171,6 +186,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "doctor":
             return _doctor(args)
+        if args.command == "controller":
+            result = run_controller(
+                infra_root=args.infra_root,
+                bundle_path=args.bundle,
+                output_path=args.output,
+                work_root=args.work_root,
+                attestation_verified=args.attestation_verified,
+            )
+            _emit_json_result(result)
+            return 0
         if args.command == "scan":
             estate_root = args.estate_root.resolve(strict=True)
             contracts = ContractSet(
@@ -288,6 +313,8 @@ def _doctor(args: argparse.Namespace) -> int:
     )
     if shutil.which("git") is None:
         raise GardenerError("git is required for worktree safety checks")
+    if shutil.which("openssl") is None:
+        raise GardenerError("openssl is required for GitHub App JWT signing")
     result = {
         "schema_version": "atlas-gardener/doctor/v1",
         "status": "ok",
@@ -306,6 +333,13 @@ def _doctor(args: argparse.Namespace) -> int:
             "installation_token_source": "approved external broker via environment",
             "provider_installation_in_scope": False,
             "stop_after": "draft-pull-request",
+        },
+        "automatic_controller": {
+            "source_default": "disabled",
+            "manual_cli_interactive_gate_retained": True,
+            "token_broker": "repository-restricted GitHub App installation token",
+            "automatic_merge_owner": "target repository reusable workflow",
+            "github_app_permission_expansion": False,
         },
     }
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))
