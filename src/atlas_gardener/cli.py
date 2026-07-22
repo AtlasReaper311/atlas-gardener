@@ -16,10 +16,17 @@ from atlas_gardener.contracts import (
     resolve_contracts_root,
     write_json,
 )
-from atlas_gardener.engine import apply_proposal, propose, scan
 from atlas_gardener.dependabot_rollout import execute_rollout
+from atlas_gardener.engine import apply_proposal, propose, scan
 from atlas_gardener.errors import GardenerError
 from atlas_gardener.fixers import RULE_FIXERS
+from atlas_gardener.github_app_pr import (
+    apply_pr_plan,
+    build_pr_plan,
+    installation_token_from_environment,
+    plan_summary,
+    validate_pr_plan,
+)
 from atlas_gardener.safety import MAX_CHANGED_FILES, MAX_CHANGED_LINES
 
 
@@ -88,11 +95,51 @@ def build_parser() -> argparse.ArgumentParser:
         "--apply", action="store_true", help="confirm, push, and open draft PRs"
     )
 
+    app_plan_parser = commands.add_parser(
+        "github-app-pr-plan",
+        help="build an offline exact draft-PR plan from a reviewed proposal",
+    )
+    app_plan_parser.add_argument("--proposal", required=True, type=_path)
+    app_plan_parser.add_argument("--repo", required=True, type=_path)
+    app_plan_parser.add_argument("--output", required=True, type=_path)
+    app_plan_parser.add_argument("--contracts-root", type=_path)
+    app_plan_parser.add_argument("--pins-file", type=_path)
+    app_plan_parser.add_argument("--base-branch", default="main")
+
+    app_pr_parser = commands.add_parser(
+        "github-app-pr",
+        help="review or open one draft PR from an exact GitHub App PR plan",
+    )
+    app_pr_parser.add_argument("--plan", required=True, type=_path)
+    app_pr_parser.add_argument("--approved-plan-digest")
+    app_pr_mode = app_pr_parser.add_mutually_exclusive_group()
+    app_pr_mode.add_argument(
+        "--dry-run", action="store_true", help="verify and summarize only; default"
+    )
+    app_pr_mode.add_argument(
+        "--apply",
+        action="store_true",
+        help="use an externally brokered installation token to open one draft PR",
+    )
+
     doctor_parser = commands.add_parser("doctor", help="verify local prerequisites")
     doctor_parser.add_argument("--contracts-root", type=_path)
 
     commands.add_parser("version", help="print the package version")
     return parser
+
+
+def _confirm_github_app_apply(plan: dict, approved_digest: str) -> None:
+    print(
+        f"Approved GitHub App PR plan: {plan['repository']} "
+        f"{plan['base_sha'][:12]} -> {plan['branch']} ({approved_digest})"
+    )
+    try:
+        answer = input("Open this exact draft pull request and stop? [y/N] ").strip().lower()
+    except EOFError as error:
+        raise GardenerError("interactive confirmation is required") from error
+    if answer not in {"y", "yes"}:
+        raise GardenerError("GitHub App PR apply was not confirmed")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -166,6 +213,46 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))
             return 0
+        if args.command == "github-app-pr-plan":
+            repository = args.repo.resolve(strict=True)
+            contracts = ContractSet(
+                resolve_contracts_root(args.contracts_root, repository=repository)
+            )
+            plan = build_pr_plan(
+                proposal_path=args.proposal.resolve(strict=True),
+                repository=repository,
+                contracts=contracts,
+                base_branch=args.base_branch,
+                pins_file=args.pins_file,
+            )
+            write_json(args.output, plan)
+            print(json.dumps(plan_summary(plan), ensure_ascii=False, sort_keys=True, indent=2))
+            print(f"exact GitHub App PR plan written: {args.output}")
+            return 0
+        if args.command == "github-app-pr":
+            plan = validate_pr_plan(read_json(args.plan.resolve(strict=True)))
+            if not args.apply:
+                print(
+                    json.dumps(
+                        plan_summary(plan),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        indent=2,
+                    )
+                )
+                return 0
+            if not args.approved_plan_digest:
+                raise GardenerError("--apply requires --approved-plan-digest")
+            if args.approved_plan_digest != plan["plan_digest"]:
+                raise GardenerError("approved plan digest does not match the reviewed plan")
+            _confirm_github_app_apply(plan, args.approved_plan_digest)
+            result = apply_pr_plan(
+                plan,
+                approved_plan_digest=args.approved_plan_digest,
+                token=installation_token_from_environment(),
+            )
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))
+            return 0
     except (GardenerError, OSError, ValueError) as error:
         print(f"atlas-gardener: refused: {error}", file=sys.stderr)
         return 2
@@ -191,6 +278,13 @@ def _doctor(args: argparse.Namespace) -> int:
         "max_changed_lines": MAX_CHANGED_LINES,
         "fixers": sorted(set(RULE_FIXERS.values())),
         "network_access": False,
+        "github_app_pr_adapter": {
+            "default_mode": "dry-run",
+            "apply_network_access": True,
+            "installation_token_source": "approved external broker via environment",
+            "provider_installation_in_scope": False,
+            "stop_after": "draft-pull-request",
+        },
     }
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2))
     return 0
