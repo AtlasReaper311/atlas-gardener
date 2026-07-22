@@ -72,77 +72,39 @@ jobs:
         run: PYTHONPATH=src:tests python -m unittest test_automation -v
 
       - name: Gate accepts exact low-risk success
-        id: gate_success
-        continue-on-error: true
         env:
           ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
         run: PYTHONPATH=src:tests python -m unittest test_automerge_gate.AutomergeGateTests.test_successful_low_risk_ci_is_eligible -v
 
       - name: Gate refuses missing checks
-        id: gate_missing_checks
-        continue-on-error: true
         env:
           ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
         run: PYTHONPATH=src:tests python -m unittest test_automerge_gate.AutomergeGateTests.test_missing_checks_never_count_as_success -v
 
       - name: Gate refuses failed CI
-        id: gate_failed_ci
-        continue-on-error: true
         env:
           ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
         run: PYTHONPATH=src:tests python -m unittest test_automerge_gate.AutomergeGateTests.test_failed_ci_prevents_merge -v
 
       - name: Gate refuses changed commits
-        id: gate_changed_commit
-        continue-on-error: true
         env:
           ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
         run: PYTHONPATH=src:tests python -m unittest test_automerge_gate.AutomergeGateTests.test_changed_head_and_extra_commit_fail_closed -v
 
       - name: Gate refuses protected paths
-        id: gate_paths
-        continue-on-error: true
         env:
           ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
         run: PYTHONPATH=src:tests python -m unittest test_automerge_gate.AutomergeGateTests.test_workflow_source_and_lockfile_paths_fail_closed -v
 
       - name: Gate refuses deletions and unexpected lines
-        id: gate_patch
-        continue-on-error: true
         env:
           ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
         run: PYTHONPATH=src:tests python -m unittest test_automerge_gate.AutomergeGateTests.test_deletion_and_unapproved_line_fail_closed -v
 
       - name: Gate refuses expired or changed policy
-        id: gate_expiry
-        continue-on-error: true
         env:
           ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
         run: PYTHONPATH=src:tests python -m unittest test_automerge_gate.AutomergeGateTests.test_expired_and_changed_policy_fail_closed -v
-
-      - name: Preserve auto-merge gate result
-        if: always()
-        env:
-          GATE_SUCCESS: ${{ steps.gate_success.outcome }}
-          GATE_MISSING_CHECKS: ${{ steps.gate_missing_checks.outcome }}
-          GATE_FAILED_CI: ${{ steps.gate_failed_ci.outcome }}
-          GATE_CHANGED_COMMIT: ${{ steps.gate_changed_commit.outcome }}
-          GATE_PATHS: ${{ steps.gate_paths.outcome }}
-          GATE_PATCH: ${{ steps.gate_patch.outcome }}
-          GATE_EXPIRY: ${{ steps.gate_expiry.outcome }}
-        run: |
-          set -euo pipefail
-          for outcome in \
-            "$GATE_SUCCESS" \
-            "$GATE_MISSING_CHECKS" \
-            "$GATE_FAILED_CI" \
-            "$GATE_CHANGED_COMMIT" \
-            "$GATE_PATHS" \
-            "$GATE_PATCH" \
-            "$GATE_EXPIRY"
-          do
-            test "$outcome" = "success"
-          done
 
       - name: Test automatic controller modes
         env:
