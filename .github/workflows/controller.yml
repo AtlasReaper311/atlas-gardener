@@ -22,7 +22,7 @@ jobs:
     env:
       ATLAS_GARDENER_MODE: ${{ vars.ATLAS_GARDENER_MODE || 'disabled' }}
       ATLAS_GARDENER_WRITE_GATE: ${{ vars.ATLAS_GARDENER_WRITE_GATE || 'disabled' }}
-      AUTHORITY_SHA: 5f03eb8d7e3b209a82e06b6e939984330be126d7
+      AUTHORITY_SHA: 70f8e3867e92e28305fde22b41705a6eb46bd9f1
       BUNDLE_PATH: ${{ github.workspace }}/controller-input/gardener-findings.json
       EVIDENCE_PATH: ${{ github.workspace }}/controller-evidence/controller.json
       WORK_ROOT: ${{ github.workspace }}/controller-work
@@ -34,7 +34,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
         with:
           repository: AtlasReaper311/atlas-infra
-          ref: 5f03eb8d7e3b209a82e06b6e939984330be126d7
+          ref: 70f8e3867e92e28305fde22b41705a6eb46bd9f1
           path: .atlas-infra
           persist-credentials: false
 
