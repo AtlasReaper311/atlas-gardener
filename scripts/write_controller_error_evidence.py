@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from atlas_gardener.controller import write_controller_error_evidence
+from atlas_gardener.error_evidence import write_controller_error_evidence
 from atlas_gardener.errors import SafetyRefusal
 
 

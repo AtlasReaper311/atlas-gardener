@@ -9,8 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from atlas_gardener.controller import run_controller, write_controller_error_evidence
-from atlas_gardener.errors import GardenerError
+from atlas_gardener.error_evidence import write_controller_error_evidence
 
 
 def main() -> int:
@@ -23,15 +22,16 @@ def main() -> int:
     parser.add_argument("--attestation-verified", action="store_true")
     args = parser.parse_args()
     try:
+        from atlas_gardener.controller import run_controller
+
         run_controller(
             infra_root=args.infra_root,
             bundle_path=args.bundle,
             output_path=args.output,
             work_root=args.work_root,
             attestation_verified=args.attestation_verified,
-            previous_evidence_path=args.previous_evidence,
         )
-    except (GardenerError, OSError, UnicodeError, ValueError) as error:
+    except Exception as error:
         write_controller_error_evidence(
             args.output,
             error,
