@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "atlas-gardener"
-version = "0.3.1"
-description = "Prepare safe, deterministic, PR-only Atlas Systems remediation proposals"
+version = "0.4.0"
+description = "Policy-bound deterministic Atlas Systems remediation controller"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

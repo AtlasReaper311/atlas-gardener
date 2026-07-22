@@ -1,5 +1,5 @@
-"""Atlas Systems PR-only remediation proposal engine."""
+"""Atlas Systems policy-bound remediation controller."""
 
 __all__ = ["__version__"]
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"

@@ -16,34 +16,110 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    env:
+      AUTHORITY_SHA: 67fc27b66cb1a47951d1d649650130f7d3586ca2
+      ATLAS_GARDENER_CONTRACTS: ${{ github.workspace }}/.contracts/atlas-infra/contracts/v1
+      ATLAS_GARDENER_TEST_INFRA_ROOT: ${{ github.workspace }}/.contracts/atlas-infra
     steps:
       - name: Check out atlas-gardener
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
 
-      - name: Check out authoritative contracts
+      - name: Check out reviewed automation authority
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
         with:
           repository: AtlasReaper311/atlas-infra
+          ref: 67fc27b66cb1a47951d1d649650130f7d3586ca2
           path: .contracts/atlas-infra
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0, Node 24
         with:
           python-version: "3.12"
 
-      - name: Compile
-        run: python -m compileall -q src tests
+      - name: Verify immutable authority
+        run: |
+          set -euo pipefail
+          test "$(git -C "$ATLAS_GARDENER_TEST_INFRA_ROOT" rev-parse HEAD)" = "$AUTHORITY_SHA"
+          python3 "$ATLAS_GARDENER_TEST_INFRA_ROOT/scripts/validate_gardener_automation.py" --quiet
 
-      - name: Test
+      - name: Compile
+        run: python -m compileall -q src tests scripts
+
+      - name: Run repository-isolated tests
+        run: |
+          set -euo pipefail
+          : > /tmp/atlas-gardener-repository-tests.log
+          for path in tests/test_*.py
+          do
+            module="$(basename "$path" .py)"
+            case "$module" in
+              test_automation|test_automerge_gate|test_controller)
+                continue
+                ;;
+            esac
+            if ! PYTHONPATH=src:tests python -m unittest "$module" -v >> /tmp/atlas-gardener-repository-tests.log 2>&1
+            then
+              cat /tmp/atlas-gardener-repository-tests.log
+              exit 1
+            fi
+          done
+
+      - name: Test automation policy and bundle logic
         env:
-          ATLAS_GARDENER_CONTRACTS: ${{ github.workspace }}/.contracts/atlas-infra/contracts/v1
-        run: PYTHONPATH=src python -m unittest discover -s tests -v
+          ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
+        run: PYTHONPATH=src:tests python -m unittest test_automation -v
+
+      - name: Gate accepts exact low-risk success
+        env:
+          ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
+        run: PYTHONPATH=src:tests python -m unittest test_automerge_gate.AutomergeGateTests.test_successful_low_risk_ci_is_eligible -v
+
+      - name: Gate refuses missing checks
+        env:
+          ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
+        run: PYTHONPATH=src:tests python -m unittest test_automerge_gate.AutomergeGateTests.test_missing_checks_never_count_as_success -v
+
+      - name: Gate refuses failed CI
+        env:
+          ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
+        run: PYTHONPATH=src:tests python -m unittest test_automerge_gate.AutomergeGateTests.test_failed_ci_prevents_merge -v
+
+      - name: Gate refuses changed commits
+        env:
+          ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
+        run: PYTHONPATH=src:tests python -m unittest test_automerge_gate.AutomergeGateTests.test_changed_head_and_extra_commit_fail_closed -v
+
+      - name: Gate refuses protected paths
+        env:
+          ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
+        run: PYTHONPATH=src:tests python -m unittest test_automerge_gate.AutomergeGateTests.test_workflow_source_and_lockfile_paths_fail_closed -v
+
+      - name: Gate refuses deletions and unexpected lines
+        env:
+          ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
+        run: PYTHONPATH=src:tests python -m unittest test_automerge_gate.AutomergeGateTests.test_deletion_and_unapproved_line_fail_closed -v
+
+      - name: Gate refuses expired or changed policy
+        env:
+          ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
+        run: PYTHONPATH=src:tests python -m unittest test_automerge_gate.AutomergeGateTests.test_expired_and_changed_policy_fail_closed -v
+
+      - name: Test automatic controller modes
+        env:
+          ATLAS_GARDENER_INFRA_ROOT: ${{ env.ATLAS_GARDENER_TEST_INFRA_ROOT }}
+        run: PYTHONPATH=src:tests python -m unittest test_controller -v
 
       - name: Doctor
         run: >-
           PYTHONPATH=src python -m atlas_gardener doctor
           --contracts-root .contracts/atlas-infra/contracts/v1
+
+      - name: Validate shell files
+        run: |
+          set -euo pipefail
+          find scripts -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
 
       - name: Check whitespace
         run: git diff --check

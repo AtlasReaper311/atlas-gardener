@@ -1,0 +1,75 @@
+name: Atlas Gardener controller failure evidence
+
+on:
+  workflow_run:
+    workflows: ["Atlas Gardener controller"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: atlas-gardener-controller-failure-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  preserve:
+    name: Preserve controller preflight failure
+    if: github.event.workflow_run.conclusion != 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EVIDENCE_PATH: controller-failure-evidence/controller.json
+    steps:
+      - name: Write bounded failure evidence
+        env:
+          CONTROLLER_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          CONTROLLER_EVENT: ${{ github.event.workflow_run.event }}
+          CONTROLLER_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          CONTROLLER_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          CONTROLLER_RUN_ID: ${{ github.event.workflow_run.id }}
+          CONTROLLER_URL: ${{ github.event.workflow_run.html_url }}
+          MODE: ${{ vars.ATLAS_GARDENER_MODE || 'disabled' }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$EVIDENCE_PATH")"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          evidence = {
+              "schema_version": "atlas-gardener/controller-preflight-failure/v1",
+              "controller_run_id": os.environ["CONTROLLER_RUN_ID"],
+              "controller_run_attempt": int(os.environ["CONTROLLER_RUN_ATTEMPT"]),
+              "controller_event": os.environ["CONTROLLER_EVENT"],
+              "controller_conclusion": os.environ["CONTROLLER_CONCLUSION"],
+              "controller_head_sha": os.environ["CONTROLLER_HEAD_SHA"],
+              "controller_url": os.environ["CONTROLLER_URL"],
+              "mode": os.environ["MODE"],
+              "status": "failed-before-complete-controller-evidence",
+              "observed_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+          }
+          material = json.dumps(
+              evidence,
+              ensure_ascii=False,
+              sort_keys=True,
+              separators=(",", ":"),
+          ).encode("utf-8")
+          evidence["evidence_digest"] = "sha256:" + hashlib.sha256(material).hexdigest()
+          Path(os.environ["EVIDENCE_PATH"]).write_text(
+              json.dumps(evidence, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Upload bounded failure evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: atlas-gardener-controller-failure-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          path: ${{ env.EVIDENCE_PATH }}
+          if-no-files-found: error
+          retention-days: 30
