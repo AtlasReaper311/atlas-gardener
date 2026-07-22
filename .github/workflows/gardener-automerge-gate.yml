@@ -251,14 +251,150 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_URL: ${{ github.event.pull_request.html_url }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          CURRENT=$(gh pr view "$PR_URL" --json autoMergeRequest --jq '.autoMergeRequest')
-          if [ "$CURRENT" != "null" ]; then
+
+          gh pr view "$PR_URL" \
+            --json id,state,headRefOid,autoMergeRequest \
+            > /tmp/gardener-automerge-before.json
+
+          python3 - <<'PY'
+          import json
+          import os
+
+          document = json.load(
+              open("/tmp/gardener-automerge-before.json", encoding="utf-8")
+          )
+          if document.get("state") != "OPEN":
+              raise SystemExit("pull request is no longer open")
+          if document.get("headRefOid") != os.environ["EXPECTED_HEAD_SHA"]:
+              raise SystemExit("pull request head changed before auto-merge enablement")
+          PY
+
+          CURRENT=$(python3 - <<'PY'
+          import json
+
+          document = json.load(
+              open("/tmp/gardener-automerge-before.json", encoding="utf-8")
+          )
+          print("set" if document.get("autoMergeRequest") is not None else "null")
+          PY
+          )
+          if [ "$CURRENT" = "set" ]; then
             echo "Native auto-merge is already enabled."
             exit 0
           fi
-          gh pr merge --auto --squash --delete-branch "$PR_URL"
+
+          PR_ID=$(python3 - <<'PY'
+          import json
+
+          document = json.load(
+              open("/tmp/gardener-automerge-before.json", encoding="utf-8")
+          )
+          print(document["id"])
+          PY
+          )
+
+          gh api graphql \
+            -f query='
+              mutation EnableGardenerAutoMerge($pullRequestId: ID!) {
+                enablePullRequestAutoMerge(
+                  input: {
+                    pullRequestId: $pullRequestId
+                    mergeMethod: SQUASH
+                  }
+                ) {
+                  pullRequest {
+                    state
+                    headRefOid
+                    autoMergeRequest {
+                      enabledAt
+                      enabledBy {
+                        login
+                      }
+                      mergeMethod
+                    }
+                  }
+                }
+              }
+            ' \
+            -F pullRequestId="$PR_ID" \
+            > /tmp/gardener-automerge-mutation.json
+
+          python3 - <<'PY'
+          import json
+          import os
+
+          document = json.load(
+              open("/tmp/gardener-automerge-mutation.json", encoding="utf-8")
+          )
+          pull_request = document["data"]["enablePullRequestAutoMerge"]["pullRequest"]
+          if pull_request.get("state") != "OPEN":
+              raise SystemExit("pull request closed during auto-merge enablement")
+          if pull_request.get("headRefOid") != os.environ["EXPECTED_HEAD_SHA"]:
+              raise SystemExit("pull request head changed during auto-merge enablement")
+          request = pull_request.get("autoMergeRequest")
+          if not isinstance(request, dict):
+              raise SystemExit("GitHub did not create an autoMergeRequest")
+          if request.get("mergeMethod") != "SQUASH":
+              raise SystemExit("GitHub created auto-merge with an unexpected merge method")
+          enabled_by = (request.get("enabledBy") or {}).get("login")
+          if not enabled_by:
+              raise SystemExit("autoMergeRequest does not identify its enabling actor")
+          print(f"Native auto-merge armed by {enabled_by}.")
+          PY
+
+          for attempt in $(seq 1 10)
+          do
+            gh pr view "$PR_URL" \
+              --json state,headRefOid,autoMergeRequest \
+              > /tmp/gardener-automerge-after.json
+
+            RESULT=$(python3 - <<'PY'
+          import json
+          import os
+
+          document = json.load(
+              open("/tmp/gardener-automerge-after.json", encoding="utf-8")
+          )
+          if document.get("state") != "OPEN":
+              print("closed")
+          elif document.get("headRefOid") != os.environ["EXPECTED_HEAD_SHA"]:
+              print("moved")
+          elif document.get("autoMergeRequest") is not None:
+              print("armed")
+          else:
+              print("pending")
+          PY
+          )
+
+            case "$RESULT" in
+              armed)
+                echo "Verified native autoMergeRequest postcondition."
+                exit 0
+                ;;
+              closed)
+                echo "Pull request closed before the auto-merge postcondition was verified." >&2
+                exit 1
+                ;;
+              moved)
+                echo "Pull request head changed before the auto-merge postcondition was verified." >&2
+                exit 1
+                ;;
+              pending)
+                if [ "$attempt" -eq 10 ]; then
+                  echo "GitHub did not retain the native autoMergeRequest." >&2
+                  exit 1
+                fi
+                sleep 2
+                ;;
+              *)
+                echo "Unexpected auto-merge verification state: $RESULT" >&2
+                exit 1
+                ;;
+            esac
+          done
 
       - name: Revoke workflow-owned auto-merge after refusal
         if: failure()
