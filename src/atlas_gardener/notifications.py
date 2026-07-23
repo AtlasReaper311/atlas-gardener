@@ -71,7 +71,7 @@ def build_notification(
     bounded_fields["event"] = event
     return {
         "source": "alert",
-        "signal_class": "cicd",
+        "signal_class": "gardener",
         "level": level,
         "title": title,
         "message": message,
