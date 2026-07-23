@@ -2,7 +2,7 @@ name: Atlas Gardener controller
 
 on:
   schedule:
-    - cron: "15 10 * * *"
+    - cron: "15 10 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -23,7 +23,7 @@ jobs:
       ATLAS_GARDENER_MODE: ${{ vars.ATLAS_GARDENER_MODE || 'disabled' }}
       ATLAS_GARDENER_WRITE_GATE: ${{ vars.ATLAS_GARDENER_WRITE_GATE || 'disabled' }}
       ATLAS_GARDENER_WRITE_TARGETS_JSON: ${{ vars.ATLAS_GARDENER_WRITE_TARGETS_JSON || '[]' }}
-      AUTHORITY_SHA: 6689de2c7ccd9264348c75bed99745021f88f191
+      AUTHORITY_SHA: 1c9e37055818a6141d46e92ecf15ec40922279b8
       BUNDLE_PATH: ${{ github.workspace }}/controller-input/gardener-findings.json
       EVIDENCE_PATH: ${{ github.workspace }}/controller-evidence/controller.json
       WORK_ROOT: ${{ github.workspace }}/controller-work
@@ -35,7 +35,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
         with:
           repository: AtlasReaper311/atlas-infra
-          ref: 6689de2c7ccd9264348c75bed99745021f88f191
+          ref: 1c9e37055818a6141d46e92ecf15ec40922279b8
           path: .atlas-infra
           persist-credentials: false
 
@@ -60,6 +60,7 @@ jobs:
             tests.test_write_targets \
             -v
           python3 .atlas-infra/scripts/validate_gardener_automation.py --quiet
+          python3 .atlas-infra/scripts/validate_gardener_target_readiness.py --quiet
           test "$(git -C .atlas-infra rev-parse HEAD)" = "$AUTHORITY_SHA"
 
       - name: Validate controller mode
