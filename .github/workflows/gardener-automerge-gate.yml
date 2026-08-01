@@ -44,7 +44,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out immutable Gardener gate implementation
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.0, Node 24
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
@@ -52,7 +52,7 @@ jobs:
           persist-credentials: false
 
       - name: Check out immutable Atlas Infra authority
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.0, Node 24
         with:
           repository: AtlasReaper311/atlas-infra
           ref: ${{ inputs.authority_ref }}
@@ -164,7 +164,7 @@ jobs:
           done
 
       - name: Check out exact target base evidence
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.0, Node 24
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.event.pull_request.base.sha }}
@@ -174,7 +174,7 @@ jobs:
           persist-credentials: false
 
       - name: Check out exact target head evidence
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0, Node 24
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.0, Node 24
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.event.pull_request.head.sha }}
