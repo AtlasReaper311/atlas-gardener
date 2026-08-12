@@ -49,6 +49,35 @@ def required_check_contexts(protection: dict[str, Any]) -> set[str]:
     return contexts
 
 
+def readiness_targets(policy: dict[str, Any]) -> list[dict[str, Any]]:
+    targets = policy.get("targets")
+    if isinstance(targets, list):
+        return targets
+
+    batches = policy.get("batches")
+    active_batch_ids = policy.get("active_batch_ids")
+    if not isinstance(batches, list) or not isinstance(active_batch_ids, list):
+        raise ReadinessError("readiness policy must define targets or active batches")
+    if not all(isinstance(batch_id, str) and batch_id for batch_id in active_batch_ids):
+        raise ReadinessError("readiness policy active batches must be named")
+
+    active = set(active_batch_ids)
+    selected: list[dict[str, Any]] = []
+    for batch in batches:
+        if not isinstance(batch, dict):
+            raise ReadinessError("readiness batch is malformed")
+        if batch.get("id") not in active:
+            continue
+        batch_targets = batch.get("targets")
+        if not isinstance(batch_targets, list):
+            raise ReadinessError(f"readiness batch {batch.get('id')} targets must be an array")
+        selected.extend(batch_targets)
+
+    if not selected:
+        raise ReadinessError("readiness policy active batches did not select any targets")
+    return selected
+
+
 def validate_target(
     *,
     policy: dict[str, Any],
@@ -112,9 +141,7 @@ def collect_and_validate(
     runner: Callable[[Sequence[str]], str] = _run_gh,
 ) -> dict[str, Any]:
     policy = _json_object(policy_path.read_text(encoding="utf-8"), "readiness policy")
-    targets = policy.get("targets")
-    if not isinstance(targets, list):
-        raise ReadinessError("readiness policy targets must be an array")
+    targets = readiness_targets(policy)
 
     reports = []
     for target in targets:

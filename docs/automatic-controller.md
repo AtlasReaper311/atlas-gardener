@@ -73,7 +73,7 @@ The initial approved lines are `.DS_Store`, `__pycache__/`, and `*.py[cod]`, sel
 
 Every controller run writes one bounded JSON artifact with 30-day retention containing run identity, mode, write-gate state, policy and coverage digests, bundle digest, Finding fingerprints, proposals, plans, refusals, pull-request outcomes, token mint and revoke status, notifications, and an evidence digest. Credential values and sensitive file contents are excluded.
 
-Notifications use the existing authenticated Atlas Notify `alert` envelope with `signal_class=cicd`. The controller emits consolidated state outcomes rather than one message per internal action.
+Notifications use the existing authenticated Atlas Notify `alert` envelope with `signal_class=gardener`. The controller emits consolidated state outcomes rather than one message per internal action. Atlas Notify must configure `GARDENER_WEBHOOK_URL` for a dedicated Gardener channel; otherwise this class falls back to the default webhook.
 
 ## Scheduling
 
