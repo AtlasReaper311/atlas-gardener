@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      AUTHORITY_SHA: e013aa009026452bccd6b7fc280817e80106dcc7
+      AUTHORITY_SHA: 11e7a727590aa5376e766416b1e6a83fb6fd98ef
       ATLAS_GARDENER_CONTRACTS: ${{ github.workspace }}/.contracts/atlas-infra/contracts/v1
       ATLAS_GARDENER_TEST_INFRA_ROOT: ${{ github.workspace }}/.contracts/atlas-infra
     steps:
@@ -29,7 +29,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.0, Node 24
         with:
           repository: AtlasReaper311/atlas-infra
-          ref: e013aa009026452bccd6b7fc280817e80106dcc7
+          ref: 11e7a727590aa5376e766416b1e6a83fb6fd98ef
           path: .contracts/atlas-infra
           persist-credentials: false
 

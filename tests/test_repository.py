@@ -57,7 +57,7 @@ class RepositoryBaselineTests(unittest.TestCase):
         allowed_adapters = {
             "src/atlas_gardener/automatic_github.py",
             "src/atlas_gardener/github_app_auth.py",
-            "src/atlas_gardener/github_app_pr.py",
+            "src/atlas_gardener/_github_app_pr_core.py",
             "src/atlas_gardener/notifications.py",
         }
         network_sources = {
@@ -65,7 +65,7 @@ class RepositoryBaselineTests(unittest.TestCase):
         }
         self.assertEqual(allowed_adapters, network_sources)
 
-        app_pr = sources["src/atlas_gardener/github_app_pr.py"]
+        app_pr = sources["src/atlas_gardener/_github_app_pr_core.py"]
         self.assertIn("_allowed_api_operation", app_pr)
         self.assertIn("_MAX_RESPONSE_BYTES", app_pr)
         self.assertIn("timeout=30", app_pr)
