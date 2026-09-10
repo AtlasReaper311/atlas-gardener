@@ -116,6 +116,18 @@ def _eligibility_plan(plan: dict[str, Any], change_plan: Any) -> dict[str, Any]:
     return value
 
 
+def _notification_fields(evidence: dict[str, Any]) -> dict[str, str]:
+    return {
+        "mode": str(evidence["mode"]),
+        "findings": str(len(evidence["finding_fingerprints"])),
+        "actionable": str(len(evidence["plans"])),
+        "observations": str(len(evidence.get("findings_observed", []))),
+        "scope_skips": str(len(evidence["repositories_skipped"])),
+        "refusals": str(len(evidence["refusals"])),
+        "pr_outcomes": str(len(evidence["pull_requests"])),
+    }
+
+
 def _notification_for(evidence: dict[str, Any], run_url: str) -> dict[str, Any]:
     if evidence["mode"] == "disabled":
         return build_notification(
@@ -126,29 +138,32 @@ def _notification_for(evidence: dict[str, Any], run_url: str) -> dict[str, Any]:
             run_url=run_url,
             fields={"mode": "disabled"},
         )
+    fields = _notification_fields(evidence)
     if evidence["refusals"]:
         return build_notification(
             event="remediation_refused",
             level="warning",
             title="Atlas Gardener remediation refused",
             message=(
-                f"{len(evidence['refusals'])} Finding(s) failed closed; "
-                f"{len(evidence['pull_requests'])} pull request outcome(s) were recorded."
+                f"{fields['refusals']} Finding(s) failed closed during controller processing; "
+                f"{fields['observations']} non-actionable Finding(s) were observed; "
+                f"{fields['pr_outcomes']} pull request outcome(s) were recorded."
             ),
             run_url=run_url,
-            fields={
-                "mode": evidence["mode"],
-                "refusals": str(len(evidence["refusals"])),
-            },
+            fields=fields,
         )
     if any(item.get("state") == "merged" for item in evidence["pull_requests"]):
         return build_notification(
             event="pr_merged",
             level="success",
             title="Atlas Gardener remediation merged",
-            message="A previously approved low-risk Gardener remediation is now merged.",
+            message=(
+                "A previously approved low-risk Gardener remediation is now merged; "
+                f"{fields['observations']} non-actionable Finding(s) were observed; "
+                "0 refusals were recorded."
+            ),
             run_url=run_url,
-            fields={"mode": evidence["mode"]},
+            fields=fields,
         )
     if evidence["pull_requests"]:
         return build_notification(
@@ -156,28 +171,31 @@ def _notification_for(evidence: dict[str, Any], run_url: str) -> dict[str, Any]:
             level="info",
             title="Atlas Gardener pull request outcome",
             message=(
-                f"Recorded {len(evidence['pull_requests'])} deterministic "
-                "Gardener pull request outcome(s)."
+                f"Recorded {fields['pr_outcomes']} deterministic Gardener pull request outcome(s); "
+                f"{fields['observations']} non-actionable Finding(s) were observed; "
+                "0 refusals were recorded."
             ),
             run_url=run_url,
-            fields={"mode": evidence["mode"]},
+            fields=fields,
         )
     return build_notification(
         event="finding_received",
         level="info",
         title="Atlas Gardener Finding bundle processed",
         message=(
-            f"Processed {len(evidence['finding_fingerprints'])} Finding(s) "
-            "without a target write."
+            f"Processed {fields['findings']} Finding(s): {fields['actionable']} actionable plan(s), "
+            f"{fields['observations']} non-actionable observation(s), "
+            f"{fields['scope_skips']} scope skip(s), 0 refusals."
         ),
         run_url=run_url,
-        fields={"mode": evidence["mode"]},
+        fields=fields,
     )
 
 
 def _sort_evidence(evidence: dict[str, Any]) -> None:
     for key in (
         "finding_fingerprints",
+        "findings_observed",
         "proposals",
         "plans",
         "repositories_skipped",
@@ -235,6 +253,7 @@ def run_controller(
     mode, write_gate = resolve_mode(policy)
     write_targets = resolve_write_targets(policy, coverage, mode)
     evidence = new_evidence(mode=mode, policy=policy, coverage=coverage, bundle=None)
+    evidence["findings_observed"] = []
     evidence["write_gate_enabled"] = write_gate
     evidence["attestation_verified"] = attestation_verified
     evidence["authority_commit"] = _git(["rev-parse", "HEAD"], cwd=infra_root)
@@ -309,6 +328,17 @@ def run_controller(
                 raise SafetyRefusal(
                     "Finding bundle has no exact repository base snapshot"
                 )
+            remediation = finding["remediation"]
+            if remediation["eligible"] is not True:
+                evidence["findings_observed"].append(
+                    {
+                        "finding_fingerprint": fingerprint,
+                        "repository": repository,
+                        "rule_id": finding["rule_id"],
+                        "reason": remediation["reason"],
+                    }
+                )
+                continue
             fixer_id = fixer_for_finding(finding)
             target = _checkout_target(snapshot, work_root)
             proposal, change_plan, proposal_evidence = propose(
