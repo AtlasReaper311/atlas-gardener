@@ -18,6 +18,7 @@ from atlas_gardener.safety import (
 )
 
 _NEW_FIXERS = {"npm-security-update", "python-security-pin", "container-digest-pin"}
+_CORE_PROPOSE = _core.propose
 
 
 def propose(
@@ -28,7 +29,7 @@ def propose(
     pins_file: Path | None = None,
     classification_override=None,
 ):
-    proposal, plan, evidence = _core.propose(
+    proposal, plan, evidence = _CORE_PROPOSE(
         finding,
         repository,
         contracts,
@@ -48,7 +49,8 @@ def propose(
 
 
 # scan() lives in the preserved core module and resolves its module-global
-# propose symbol at runtime. Bind it to the candidate-aware implementation.
+# propose symbol at runtime. Bind it to the candidate-aware implementation only
+# after retaining the original implementation above.
 _core.propose = propose
 scan = _core.scan
 
