@@ -65,6 +65,20 @@ _SENSITIVE_PATH_PARTS = {
 }
 _CREDENTIAL_SUFFIXES = (".pem", ".key", ".p12", ".pfx")
 
+__all__ = (
+    "GitHubTransport",
+    "PLAN_SCHEMA",
+    "RESULT_SCHEMA",
+    "TOKEN_ENV",
+    "RestTransport",
+    "apply_pr_plan",
+    "build_pr_plan",
+    "installation_token_from_environment",
+    "plan_summary",
+    "validate_pr_plan",
+    "verify_apply_repository",
+)
+
 
 class GitHubTransport(Protocol):
     """Small injectable HTTP seam used by the adapter and unit tests."""
@@ -77,7 +91,8 @@ class GitHubTransport(Protocol):
         token: str,
         payload: dict[str, Any] | None = None,
         allow_not_found: bool = False,
-    ) -> dict[str, Any] | None: ...
+    ) -> dict[str, Any] | None:
+        raise NotImplementedError
 
 
 def _allowed_api_operation(method: str, path: str, allow_not_found: bool) -> bool:

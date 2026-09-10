@@ -18,6 +18,8 @@ from atlas_gardener.safety import (
     ensure_remediation_allowed,
 )
 
+__all__ = ("apply_proposal", "propose", "scan")
+
 
 def propose(
     finding: dict[str, Any],

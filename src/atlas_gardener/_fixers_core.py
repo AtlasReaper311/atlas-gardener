@@ -29,6 +29,14 @@ RULE_FIXERS: dict[str, str] = {
     "workflow-timeout": "workflow-timeout",
 }
 
+__all__ = (
+    "FIXER_VERSION",
+    "RULE_FIXERS",
+    "WORKFLOW_SUFFIXES",
+    "build_plan",
+    "fixer_for_finding",
+)
+
 
 def fixer_for_finding(finding: dict[str, Any]) -> str:
     """Map only explicit, allowlisted rule identifiers to a fixer."""

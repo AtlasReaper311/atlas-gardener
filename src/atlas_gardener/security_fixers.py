@@ -11,7 +11,7 @@ from typing import Any
 
 from atlas_gardener.changes import ChangePlan, FileChange
 from atlas_gardener.errors import SafetyRefusal
-from atlas_gardener.safety import read_text_file, safe_relative_path
+from atlas_gardener.safety import read_text_file
 
 _SEMVER_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 _REQUIREMENT_RE = re.compile(

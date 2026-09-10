@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from atlas_gardener.contracts import ContractSet, canonical_json, sha256_value
+from atlas_gardener.contracts import ContractSet, canonical_json
 from atlas_gardener.errors import ContractError, SafetyRefusal
 
 POLICY_SCHEMA = "atlas-gardener/automation-policy/v1"
@@ -24,6 +24,33 @@ REPOSITORY_RE = re.compile(r"^AtlasReaper311/[A-Za-z0-9._-]+$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 APPROVAL_MARKER_RE = re.compile(r"<!-- atlas-gardener-approval:([A-Za-z0-9_-]+) -->")
+
+__all__ = (
+    "APPROVAL_MARKER_RE",
+    "APPROVAL_SCHEMA",
+    "AUTO_FIXERS",
+    "BUNDLE_SCHEMA",
+    "DIGEST_RE",
+    "EVIDENCE_SCHEMA",
+    "MODES",
+    "POLICY_SCHEMA",
+    "REPOSITORY_RE",
+    "SHA_RE",
+    "WRITE_MODES",
+    "approval_marker",
+    "automatic_merge_eligible",
+    "build_approval",
+    "controller_run_identity",
+    "coverage_classifications",
+    "new_evidence",
+    "object_digest",
+    "parse_approval_marker",
+    "read_object",
+    "remediation_key",
+    "resolve_mode",
+    "validate_bundle",
+    "validate_policy",
+)
 
 
 def read_object(path: Path, *, label: str) -> dict[str, Any]:

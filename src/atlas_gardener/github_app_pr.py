@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from atlas_gardener import _github_app_pr_core as _core
-from atlas_gardener._github_app_pr_core import *  # noqa: F401,F403
+from atlas_gardener._github_app_pr_core import *
 from atlas_gardener.contracts import ContractSet, read_json
 from atlas_gardener.errors import SafetyRefusal
 from atlas_gardener.fixers import build_plan
@@ -17,9 +18,16 @@ from atlas_gardener.safety import (
 
 # Existing tests and automatic GitHub code intentionally consume these bounded
 # private helpers. Preserve their stable names across the module split.
-_allowed_api_operation = _core._allowed_api_operation
-_plan_digest = _core._plan_digest
-_pr_body = _core._pr_body
+def _allowed_api_operation(method: str, path: str, allow_not_found: bool) -> bool:
+    return _core._allowed_api_operation(method, path, allow_not_found)
+
+
+def _plan_digest(plan: dict[str, Any]) -> str:
+    return _core._plan_digest(plan)
+
+
+def _pr_body(plan: dict[str, Any]) -> str:
+    return _core._pr_body(plan)
 
 
 def _regenerate_reviewed_plan(
