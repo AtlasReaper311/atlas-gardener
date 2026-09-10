@@ -8,6 +8,8 @@ The controller accepts only an attested public Finding bundle from `AtlasReaper3
 
 Findings are data. No Finding, evidence field, repository path, or proposal string is passed to a shell. Git operations use fixed argument arrays. GitHub network operations use explicit method-and-path allowlists.
 
+A valid Finding with `remediation.eligible=false` remains part of the evidence stream but is not a remediation failure. After repository classification and snapshot checks, the controller records it as a non-actionable observation and does not select a fixer, clone the target, mint a token, or create a pull request. A Finding marked remediation-eligible that cannot be processed still fails closed as a refusal.
+
 ## Modes
 
 The effective mode is the intersection of committed Atlas Infra policy and repository variables:
@@ -71,13 +73,13 @@ The initial approved lines are `.DS_Store`, `__pycache__/`, and `*.py[cod]`, sel
 
 ## Evidence and notifications
 
-Every controller run writes one bounded JSON artifact with 30-day retention containing run identity, mode, write-gate state, policy and coverage digests, bundle digest, Finding fingerprints, proposals, plans, refusals, pull-request outcomes, token mint and revoke status, notifications, and an evidence digest. Credential values and sensitive file contents are excluded.
+Every controller run writes one bounded JSON artifact with 30-day retention containing run identity, mode, write-gate state, policy and coverage digests, bundle digest, Finding fingerprints, non-actionable Finding observations, proposals, plans, refusals, pull-request outcomes, token mint and revoke status, notifications, and an evidence digest. Credential values and sensitive file contents are excluded.
 
-Notifications use the existing authenticated Atlas Notify `alert` envelope with `signal_class=gardener`. The controller emits consolidated state outcomes rather than one message per internal action. Atlas Notify must configure `GARDENER_WEBHOOK_URL` for a dedicated Gardener channel; otherwise this class falls back to the default webhook.
+Notifications use the existing authenticated Atlas Notify `alert` envelope with `signal_class=gardener`. The controller emits consolidated state outcomes rather than one message per internal action. Non-actionable observations are reported as informational counts, not remediation refusals. A warning-level `remediation_refused` notification is reserved for Findings that fail controller validation or an attempted supported remediation. Atlas Notify must configure `GARDENER_WEBHOOK_URL` for a dedicated Gardener channel; otherwise this class falls back to the default webhook.
 
 ## Scheduling
 
-The weekly public audit remains Monday at 08:41 UTC. Gardener is scheduled daily at 10:15 UTC. Monday can ingest a fresh attested bundle; later daily runs reconcile deterministic pull-request outcomes. The Finding bundle expires after 36 hours, so a delayed Monday audit can be consumed on Tuesday without allowing an old weekly result to replay indefinitely.
+The weekly public audit runs on Monday at `08:41 UTC`. Gardener reconciles the resulting attested bundle on Monday at `10:15 UTC`. Manual dispatch remains available for an owner-approved exceptional run. The controller does not run daily because the Finding bundle expires after thirty-six hours; a daily controller against a weekly producer would spend most of the week rejecting stale evidence.
 
 The schedule exists in source but live writes remain disabled until the repository variables, secrets, audit handoff, target caller, native auto-merge setting, and staged rollout are separately approved.
 
