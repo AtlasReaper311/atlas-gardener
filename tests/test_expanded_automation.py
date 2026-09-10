@@ -17,7 +17,12 @@ from atlas_gardener.errors import ContractError, SafetyRefusal
 class ExpandedAutomationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.infra = Path(os.environ["ATLAS_GARDENER_INFRA_ROOT"]).resolve()
+        root = os.environ.get("ATLAS_GARDENER_TEST_INFRA_ROOT") or os.environ.get(
+            "ATLAS_GARDENER_INFRA_ROOT"
+        )
+        if not root:
+            raise RuntimeError("Atlas Infra test root is required")
+        cls.infra = Path(root).resolve()
         cls.policy = read_object(
             cls.infra / "policy/gardener-automation.json", label="automation policy"
         )
