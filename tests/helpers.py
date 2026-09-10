@@ -54,6 +54,7 @@ def make_finding(
     rule_id: str,
     location: str,
     eligible: bool = True,
+    category: str = "policy",
     summary: str = "A deterministic fixture finding requires remediation.",
     detected_at: str | None = None,
 ) -> dict[str, Any]:
@@ -65,7 +66,7 @@ def make_finding(
             "producer_version": "1.0.0",
         },
         "subject": {"repository": f"AtlasReaper311/{repository}"},
-        "category": "policy",
+        "category": category,
         "severity": "warning",
         "rule_id": rule_id,
         "location": location,

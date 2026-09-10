@@ -17,8 +17,8 @@ class RemediationInputTests(unittest.TestCase):
             repository=repository,
             rule_id="dependency-vulnerability",
             location="requirements.txt:1",
+            category="security",
         )
-        finding["category"] = "security"
         finding["remediation"]["candidate"] = {
             "kind": "dependency-update",
             "ecosystem": "PyPI",

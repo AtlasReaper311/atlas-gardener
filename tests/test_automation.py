@@ -187,7 +187,8 @@ class AutomationTests(unittest.TestCase):
                 }
             ],
         }
-        self.assertFalse(automatic_merge_eligible(delete_plan, self.policy)[0])
+        with self.assertRaisesRegex(SafetyRefusal, "outside selected fixer authority"):
+            automatic_merge_eligible(delete_plan, self.policy)
         source_plan = copy.deepcopy(delete_plan)
         source_plan["files"][0].update(
             {
@@ -197,7 +198,8 @@ class AutomationTests(unittest.TestCase):
                 "after_text": "x = 2\n",
             }
         )
-        self.assertFalse(automatic_merge_eligible(source_plan, self.policy)[0])
+        with self.assertRaisesRegex(SafetyRefusal, "outside selected fixer authority"):
+            automatic_merge_eligible(source_plan, self.policy)
 
     def test_remediation_key_binds_base_state(self) -> None:
         common = {
