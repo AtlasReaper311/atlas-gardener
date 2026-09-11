@@ -16,6 +16,10 @@ from atlas_gardener.github_app_pr import _plan_digest, _pr_body, validate_pr_pla
 
 MAX_RESPONSE_BYTES = 1_048_576
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+PLAN_EXPIRY_RE = re.compile(
+    r"^Expires:\s*[\x60]([^\x60\r\n]+)[\x60]\s*$",
+    re.MULTILINE,
+)
 
 
 class ControllerTransport(Protocol):
@@ -160,13 +164,36 @@ def _approval_matches_plan(
     approval: dict[str, Any],
     plan: dict[str, Any],
     remediation_key: str,
+    *,
+    body: str,
 ) -> bool:
-    return (
+    stable_match = (
         approval.get("remediation_key") == remediation_key
-        and approval.get("plan_digest") == plan["plan_digest"]
         and approval.get("patch_digest") == plan["patch_digest"]
         and approval.get("base_sha") == plan["base_sha"]
     )
+    if not stable_match:
+        return False
+    if approval.get("plan_digest") == plan["plan_digest"]:
+        return True
+
+    # Proposal expiry is derived from the audit finding timestamp, so a fresh
+    # audit can renew that timestamp without changing the reviewed patch.
+    # Accept that one safe renewal case for an existing still-valid PR, while
+    # retaining the full plan digest check for every other plan change.
+    expiry_match = PLAN_EXPIRY_RE.search(body)
+    if expiry_match is None:
+        return False
+    previous_expiry = expiry_match.group(1)
+    try:
+        parsed_expiry = datetime.fromisoformat(previous_expiry.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if parsed_expiry.tzinfo is None or parsed_expiry < datetime.now(timezone.utc):
+        return False
+    previous_plan = dict(plan)
+    previous_plan["expires_at"] = previous_expiry
+    return approval.get("plan_digest") == _plan_digest(previous_plan)
 
 
 def _replacement_branch(plan: dict[str, Any], remediation_key: str) -> str:
@@ -195,7 +222,12 @@ def find_existing(
     if not matches:
         return None
     pull, approval = matches[0]
-    if not _approval_matches_plan(approval, plan, remediation_key):
+    if not _approval_matches_plan(
+        approval,
+        plan,
+        remediation_key,
+        body=pull.get("body") or "",
+    ):
         raise SafetyRefusal(
             "existing Gardener pull request does not match the current reviewed plan"
         )
@@ -221,7 +253,12 @@ def resolve_publication_plan(
         return plan, None
 
     pull, approval = matches[0]
-    if _approval_matches_plan(approval, plan, remediation_key):
+    if _approval_matches_plan(
+        approval,
+        plan,
+        remediation_key,
+        body=pull.get("body") or "",
+    ):
         return plan, pull
 
     state = "merged" if pull.get("merged_at") else pull.get("state")
