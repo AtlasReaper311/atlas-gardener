@@ -1,6 +1,7 @@
 """Idempotent GitHub publisher for policy-bound automatic Gardener pull requests."""
 from __future__ import annotations
 
+import copy
 import json
 import re
 import urllib.error
@@ -11,7 +12,7 @@ from typing import Any, Protocol
 
 from atlas_gardener.automation import approval_marker, parse_approval_marker
 from atlas_gardener.errors import GardenerError, SafetyRefusal
-from atlas_gardener.github_app_pr import _pr_body, validate_pr_plan
+from atlas_gardener.github_app_pr import _plan_digest, _pr_body, validate_pr_plan
 
 MAX_RESPONSE_BYTES = 1_048_576
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -122,15 +123,11 @@ def _remote_base_sha(client: ControllerTransport, plan: dict[str, Any], token: s
     return value.get("object", {}).get("sha") if isinstance(value, dict) else None
 
 
-def find_existing(
-    *,
+def _pulls_for_plan(
+    client: ControllerTransport,
     plan: dict[str, Any],
-    remediation_key: str,
     token: str,
-    transport: ControllerTransport | None = None,
-) -> dict[str, Any] | None:
-    plan = validate_pr_plan(plan)
-    client = transport or RestControllerTransport()
+) -> list[dict[str, Any]]:
     query = (
         f"/pulls?state=all&head=AtlasReaper311%3A{_quoted(plan['branch'])}"
         f"&base={_quoted(plan['base_branch'])}&per_page=100"
@@ -138,20 +135,114 @@ def find_existing(
     pulls = client.request("GET", _repo_path(plan, query), token=token)
     if not isinstance(pulls, list):
         raise GardenerError("GitHub did not return a pull-request list")
-    matches: list[dict[str, Any]] = []
+    return [pull for pull in pulls if isinstance(pull, dict)]
+
+
+def _matching_key_pulls(
+    pulls: list[dict[str, Any]],
+    remediation_key: str,
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for pull in pulls:
-        if not isinstance(pull, dict):
-            continue
         body = pull.get("body") or ""
         try:
             approval = parse_approval_marker(body)
         except SafetyRefusal:
             continue
         if approval.get("remediation_key") == remediation_key:
-            matches.append(pull)
+            matches.append((pull, approval))
     if len(matches) > 1:
         raise SafetyRefusal("multiple pull requests claim the same Gardener remediation key")
-    return matches[0] if matches else None
+    return matches
+
+
+def _approval_matches_plan(
+    approval: dict[str, Any],
+    plan: dict[str, Any],
+    remediation_key: str,
+) -> bool:
+    return (
+        approval.get("remediation_key") == remediation_key
+        and approval.get("plan_digest") == plan["plan_digest"]
+        and approval.get("patch_digest") == plan["patch_digest"]
+        and approval.get("base_sha") == plan["base_sha"]
+    )
+
+
+def _replacement_branch(plan: dict[str, Any], remediation_key: str) -> str:
+    key_hex = remediation_key.removeprefix("sha256:")
+    patch_hex = plan["patch_digest"].removeprefix("sha256:")
+    return (
+        f"gardener/{plan['fixer']['id']}-{key_hex[:12]}-r-{patch_hex[:12]}"
+    )
+
+
+def find_existing(
+    *,
+    plan: dict[str, Any],
+    remediation_key: str,
+    token: str,
+    transport: ControllerTransport | None = None,
+) -> dict[str, Any] | None:
+    """Return one exact current-plan PR on the selected branch, regardless of state."""
+
+    plan = validate_pr_plan(plan)
+    client = transport or RestControllerTransport()
+    matches = _matching_key_pulls(
+        _pulls_for_plan(client, plan, token),
+        remediation_key,
+    )
+    if not matches:
+        return None
+    pull, approval = matches[0]
+    if not _approval_matches_plan(approval, plan, remediation_key):
+        raise SafetyRefusal(
+            "existing Gardener pull request does not match the current reviewed plan"
+        )
+    return pull
+
+
+def resolve_publication_plan(
+    *,
+    plan: dict[str, Any],
+    remediation_key: str,
+    token: str,
+    transport: ControllerTransport | None = None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Resolve exact idempotence or one deterministic closed-PR replacement branch."""
+
+    plan = validate_pr_plan(plan)
+    client = transport or RestControllerTransport()
+    matches = _matching_key_pulls(
+        _pulls_for_plan(client, plan, token),
+        remediation_key,
+    )
+    if not matches:
+        return plan, None
+
+    pull, approval = matches[0]
+    if _approval_matches_plan(approval, plan, remediation_key):
+        return plan, pull
+
+    state = "merged" if pull.get("merged_at") else pull.get("state")
+    if state in {"open", "merged"}:
+        raise SafetyRefusal(
+            "open or merged Gardener pull request conflicts with the current reviewed plan"
+        )
+    if state != "closed":
+        raise SafetyRefusal("Gardener pull request has an unknown state")
+
+    replacement = copy.deepcopy(plan)
+    replacement["branch"] = _replacement_branch(plan, remediation_key)
+    replacement["plan_digest"] = _plan_digest(replacement)
+    replacement = validate_pr_plan(replacement)
+    existing = find_existing(
+        plan=replacement,
+        remediation_key=remediation_key,
+        token=token,
+        transport=client,
+    )
+    return replacement, existing
 
 
 def prepare_commit(
