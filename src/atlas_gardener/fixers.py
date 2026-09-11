@@ -7,6 +7,7 @@ from typing import Any
 from atlas_gardener import _fixers_core as _core
 from atlas_gardener._fixers_core import *
 from atlas_gardener.errors import SafetyRefusal
+from atlas_gardener.graph_fixers import npm_graph_plan
 from atlas_gardener.security_fixers import (
     container_digest_plan,
     npm_security_plan,
@@ -40,9 +41,16 @@ def fixer_for_finding(finding: dict[str, Any]) -> str:
     rule_id = finding.get("rule_id")
     candidate = _structured_input(finding=finding, remediation_input=None)
     if rule_id == "dependency-vulnerability":
-        if not isinstance(candidate, dict) or candidate.get("kind") != "dependency-update":
+        if not isinstance(candidate, dict):
             raise SafetyRefusal(
-                "dependency-vulnerability requires a structured dependency-update candidate"
+                "dependency-vulnerability requires structured remediation input"
+            )
+        kind = candidate.get("kind")
+        if kind == "npm-lock-security-remediation":
+            return "npm-lock-security-remediation"
+        if kind != "dependency-update":
+            raise SafetyRefusal(
+                "dependency-vulnerability candidate kind has no allowlisted fixer"
             )
         ecosystem = candidate.get("ecosystem")
         if ecosystem == "npm":
@@ -74,7 +82,9 @@ def build_plan(
         finding=finding,
         remediation_input=remediation_input,
     )
-    if fixer_id == "npm-security-update":
+    if fixer_id == "npm-lock-security-remediation":
+        plan = npm_graph_plan(repository, candidate)
+    elif fixer_id == "npm-security-update":
         plan = npm_security_plan(repository, candidate)
     elif fixer_id == "python-security-pin":
         plan = python_security_plan(repository, candidate)
