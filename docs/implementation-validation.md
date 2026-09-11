@@ -1,6 +1,6 @@
 # Expanded Gardener validation
 
-Repository-native validation for the ADR-0016 implementation is the existing pull-request CI bound to accepted Atlas Infra authority `9ac88f38c2fa370d566421f0909db85b25a309ea`.
+Repository-native validation for the ADR-0016 implementation is the existing pull-request CI bound to accepted Atlas Infra authority `eb634e5b19725ecc87902543058a4dd2a2e089c7`.
 
 The branch must pass immutable-authority validators, Python compilation, repository-isolated tests, automation policy and bundle tests, ADR-0016 npm graph fixer tests, write-target tests, automatic-merge refusal/success tests, controller tests, CLI doctor, shell syntax validation, and `git diff --check` before merge review.
 

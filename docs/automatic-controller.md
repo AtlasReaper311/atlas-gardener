@@ -47,7 +47,13 @@ The remediation key binds:
 - fixer version;
 - exact target base SHA.
 
-The key determines the `gardener/` branch namespace and appears inside the signed approval marker stored in the pull-request body. Before creating Git objects Gardener searches all pull requests on that deterministic branch. A matching open pull request is an idempotent success. A matching merged pull request is recorded as already remediated. Multiple matches, an unexplained existing branch, base drift, classification drift, policy drift, patch drift, expiry, or an unexpected commit fail closed. Gardener never force-pushes.
+The key determines the primary `gardener/` branch namespace and appears inside the signed approval marker stored in the pull-request body. Before creating Git objects Gardener searches all pull requests on that deterministic branch.
+
+A matching open pull request is idempotent only when its signed approval binds the exact current plan and patch. A matching merged pull request is already remediated only under the same condition. A matching exact closed-unmerged pull request remains closed and is not recreated.
+
+When a closed-unmerged proposal carries the same remediation key but an obsolete plan or patch, Gardener may select one deterministic replacement branch of the form `gardener/<fixer-id>-<first-12-key-hex>-r-<first-12-patch-hex>`. The replacement plan digest is recomputed after branch selection. Gardener leaves the obsolete branch and pull request untouched, then applies the same exact-state idempotence rules to the replacement branch.
+
+A conflicting open or merged proposal, multiple matching pull requests, an unexplained existing branch, approval mismatch, base drift, classification drift, policy drift, expiry, or an unexpected commit fails closed. Gardener never force-pushes, reopens, retargets, deletes, or rewrites an obsolete proposal branch.
 
 ## Automatic merge boundary
 
@@ -71,9 +77,13 @@ The target gate requires:
 
 The initial approved lines are `.DS_Store`, `__pycache__/`, and `*.py[cod]`, selected by fixer. Missing checks are never success. Failed, pending, skipped, cancelled, stale, timed-out, or unknown checks prevent automatic merge. When eligible, the target workflow enables GitHub native squash auto-merge and branch deletion. It never bypasses repository protection.
 
+Dependency and container fixers remain review-required draft-PR-only. Closed-proposal replacement does not make them eligible for native automatic merge.
+
 ## Evidence and notifications
 
 Every controller run writes one bounded JSON artifact with 30-day retention containing run identity, mode, write-gate state, policy and coverage digests, bundle digest, Finding fingerprints, non-actionable Finding observations, proposals, plans, refusals, pull-request outcomes, token mint and revoke status, notifications, and an evidence digest. Credential values and sensitive file contents are excluded.
+
+When a replacement branch is selected, the recorded plan digest is updated to the replacement plan before publication so controller evidence and the signed approval refer to the same reviewed plan.
 
 Notifications use the existing authenticated Atlas Notify `alert` envelope with `signal_class=gardener`. The controller emits consolidated state outcomes rather than one message per internal action. Non-actionable observations are reported as informational counts, not remediation refusals. A warning-level `remediation_refused` notification is reserved for Findings that fail controller validation or an attempted supported remediation. Atlas Notify must configure `GARDENER_WEBHOOK_URL` for a dedicated Gardener channel; otherwise this class falls back to the default webhook.
 

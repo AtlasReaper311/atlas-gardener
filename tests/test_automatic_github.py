@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import unittest
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 
 from atlas_gardener.automatic_github import (
@@ -10,6 +11,7 @@ from atlas_gardener.automatic_github import (
     find_existing,
     prepare_commit,
     publish_prepared,
+    resolve_publication_plan,
 )
 from atlas_gardener.automation import approval_marker
 from atlas_gardener.contracts import sha256_value
@@ -23,12 +25,18 @@ class FakeTransport:
         self.calls: list[tuple[str, str, dict | None, bool]] = []
         self.branch_exists = False
         self.pull_list: list[dict] = []
+        self.pull_lists: dict[str, list[dict]] = {}
         self.blobs = 0
 
     def request(self, method, path, *, token, payload=None, allow_not_found=False):
         self.calls.append((method, path, payload, allow_not_found))
         if "/pulls?" in path:
-            return self.pull_list
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
+            head = query.get("head", [""])[0]
+            branch = head.split(":", 1)[-1]
+            if branch in self.pull_lists:
+                return self.pull_lists[branch]
+            return self.pull_list if branch == self.plan["branch"] else []
         if "/git/ref/heads/main" in path:
             return {"object": {"sha": self.plan["base_sha"]}}
         if "/git/ref/heads/gardener%2F" in path:
@@ -224,6 +232,119 @@ class AutomaticGitHubTests(unittest.TestCase):
         )
         self.assertIsNotNone(found["merged_at"])
         self.assertTrue(all(method == "GET" for method, _, _, _ in transport.calls))
+
+    def test_exact_closed_unmerged_pr_respects_owner_closure(self) -> None:
+        plan = make_plan()
+        transport = FakeTransport(plan)
+        approval = make_approval(plan, "3" * 40)
+        closed = {
+            "number": 42,
+            "html_url": "https://github.com/AtlasReaper311/example/pull/42",
+            "body": approval_marker(approval),
+            "state": "closed",
+            "merged_at": None,
+        }
+        transport.pull_list = [closed]
+        selected, found = resolve_publication_plan(
+            plan=plan,
+            remediation_key=approval["remediation_key"],
+            token="installation-token-that-is-long-enough",
+            transport=transport,
+        )
+        self.assertEqual(plan, selected)
+        self.assertEqual(42, found["number"])
+
+    def test_closed_obsolete_patch_selects_deterministic_replacement(self) -> None:
+        plan = make_plan()
+        transport = FakeTransport(plan)
+        stale_plan = copy.deepcopy(plan)
+        stale_plan["patch_digest"] = "sha256:" + "9" * 64
+        stale_plan["plan_digest"] = _plan_digest(stale_plan)
+        stale_approval = make_approval(stale_plan, "3" * 40)
+        transport.pull_list = [
+            {
+                "number": 42,
+                "html_url": "https://github.com/AtlasReaper311/example/pull/42",
+                "body": approval_marker(stale_approval),
+                "state": "closed",
+                "merged_at": None,
+            }
+        ]
+        selected, found = resolve_publication_plan(
+            plan=plan,
+            remediation_key=stale_approval["remediation_key"],
+            token="installation-token-that-is-long-enough",
+            transport=transport,
+        )
+        self.assertIsNone(found)
+        self.assertEqual(
+            "gardener/macos-metadata-ignore-222222222222-r-dddddddddddd",
+            selected["branch"],
+        )
+        self.assertNotEqual(plan["plan_digest"], selected["plan_digest"])
+        self.assertEqual(selected["plan_digest"], _plan_digest(selected))
+
+    def test_exact_replacement_pr_is_idempotent(self) -> None:
+        plan = make_plan()
+        transport = FakeTransport(plan)
+        stale_plan = copy.deepcopy(plan)
+        stale_plan["patch_digest"] = "sha256:" + "9" * 64
+        stale_plan["plan_digest"] = _plan_digest(stale_plan)
+        stale_approval = make_approval(stale_plan, "3" * 40)
+        transport.pull_list = [
+            {
+                "number": 42,
+                "body": approval_marker(stale_approval),
+                "state": "closed",
+                "merged_at": None,
+            }
+        ]
+        replacement = copy.deepcopy(plan)
+        replacement["branch"] = (
+            "gardener/macos-metadata-ignore-222222222222-r-dddddddddddd"
+        )
+        replacement["plan_digest"] = _plan_digest(replacement)
+        replacement_approval = make_approval(replacement, "4" * 40)
+        transport.pull_lists[replacement["branch"]] = [
+            {
+                "number": 43,
+                "html_url": "https://github.com/AtlasReaper311/example/pull/43",
+                "body": approval_marker(replacement_approval),
+                "state": "open",
+                "merged_at": None,
+            }
+        ]
+        selected, found = resolve_publication_plan(
+            plan=plan,
+            remediation_key=stale_approval["remediation_key"],
+            token="installation-token-that-is-long-enough",
+            transport=transport,
+        )
+        self.assertEqual(replacement["branch"], selected["branch"])
+        self.assertEqual(43, found["number"])
+
+    def test_conflicting_open_plan_fails_closed(self) -> None:
+        plan = make_plan()
+        transport = FakeTransport(plan)
+        stale_plan = copy.deepcopy(plan)
+        stale_plan["patch_digest"] = "sha256:" + "9" * 64
+        stale_plan["plan_digest"] = _plan_digest(stale_plan)
+        stale_approval = make_approval(stale_plan, "3" * 40)
+        transport.pull_list = [
+            {
+                "number": 42,
+                "body": approval_marker(stale_approval),
+                "state": "open",
+                "merged_at": None,
+            }
+        ]
+        with self.assertRaisesRegex(SafetyRefusal, "conflicts with the current"):
+            resolve_publication_plan(
+                plan=plan,
+                remediation_key=stale_approval["remediation_key"],
+                token="installation-token-that-is-long-enough",
+                transport=transport,
+            )
 
     def test_duplicate_remediation_prs_fail_closed(self) -> None:
         plan = make_plan()
