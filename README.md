@@ -36,7 +36,7 @@ The engine hard-codes these boundaries:
 - no direct `main` edits, merge, deploy, secret, billing, branch-protection, GitHub environment, or Cloudflare change;
 - no arbitrary shell or HTTP capability and no command execution from a finding or proposal;
 - the GitHub App apply seam can call only its exact GitHub REST method-and-path allowlist;
-- no dependency or lockfile fixer;
+- dependency and lockfile remediation is limited to accepted ADR-0015/ADR-0016 structured candidates, exact path authority, deterministic regeneration, and review-required draft PRs;
 - no deprecated, archived, or external-derived repository remediation;
 - one fixer type, at most five files, and at most 200 changed lines per proposal;
 - repository-relative UTF-8 text edits only, with traversal, escaping symlink, binary, dirty-worktree, stale-preimage, and digest refusals;
@@ -162,8 +162,14 @@ Every proposal conforms to `remediation-proposal.schema.json`, including canonic
 - `workflow-timeout`
 - `workflow-permissions`
 - `action-pin-plan`
+- `npm-security-update`
+- `npm-lock-security-remediation`
+- `python-security-pin`
+- `container-digest-pin`
 
 Their exact eligibility and refusal behaviour are documented in [allowed fixers](docs/allowed-fixers.md). New fixers must follow the [safe extension procedure](docs/adding-a-fixer.md).
+
+Dependency and container fixers are review-required and draft-PR-only. Only the accepted housekeeping class can satisfy the native automatic-merge gate.
 
 The GitHub App v1 adapter refuses any proposal whose affected path is below `.github/workflows/`. Those fixers remain usable for offline proposal review and the separately approved owner-run rollout, but not through the current App permission boundary.
 
@@ -181,9 +187,9 @@ CI uses only pinned GitHub-owned actions, checks out the authoritative `atlas-in
 
 ## Current boundaries
 
-The general proposal flow does not schedule estate scans, integrate with `atlas-notify`, discover action pins, parse arbitrary YAML, or execute target validation commands. Validation commands remain inert evidence for repository-owned PR checks.
+The general proposal flow does not discover arbitrary remediation targets, modify provider configuration, merge generated PRs, deploy applications, or execute repository-defined validation commands. Validation commands remain inert evidence for repository-owned PR checks.
 
-The Dependabot rollout is a narrow owner-executed exception. The GitHub App adapter is a separately bounded source seam whose provider activation is not implied by merge. Its exact current and future permission model is documented in [GitHub pull-request model](docs/future-github-pr-model.md).
+The Dependabot rollout is a narrow owner-executed exception. The GitHub App adapter is a separately bounded source seam whose provider activation is not implied by merge. ADR-0016 extends only deterministic npm graph proposal generation and verification; it does not expand rollout or merge authority. Its exact current and future permission model is documented in [GitHub pull-request model](docs/future-github-pr-model.md).
 
 ## Ownership and licence
 

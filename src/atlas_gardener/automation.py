@@ -1,4 +1,4 @@
-"""Fail-closed automation policy extended for accepted ADR-0015 authority."""
+"""Fail-closed automation policy extended for accepted ADR-0016 authority."""
 from __future__ import annotations
 
 import copy
@@ -10,6 +10,10 @@ from atlas_gardener._automation_core import *
 from atlas_gardener.errors import ContractError, SafetyRefusal
 
 _NEW_FIXERS = {
+    "npm-lock-security-remediation": [
+        r"^(?:[A-Za-z0-9._-]+/)*package-lock\.json$",
+        r"^(?:[A-Za-z0-9._-]+/)*package\.json$",
+    ],
     "npm-security-update": [
         r"^(?:[A-Za-z0-9._-]+/)*package-lock\.json$",
         r"^(?:[A-Za-z0-9._-]+/)*package\.json$",
@@ -29,7 +33,7 @@ _ALL_FIXERS = set(_core.AUTO_FIXERS) | {
 
 
 def validate_policy(policy: dict[str, Any], coverage: dict[str, Any]) -> dict[str, Any]:
-    """Validate legacy invariants plus the exact accepted ADR-0015 fixer set."""
+    """Validate legacy invariants plus the exact accepted ADR-0016 fixer set."""
 
     fixers = policy.get("fixers")
     if not isinstance(fixers, dict) or set(fixers) != _ALL_FIXERS:

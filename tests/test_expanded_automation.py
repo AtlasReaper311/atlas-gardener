@@ -46,22 +46,24 @@ class ExpandedAutomationTests(unittest.TestCase):
 
     def test_committed_policy_accepts_exact_new_fixer_set(self) -> None:
         validated = validate_policy(copy.deepcopy(self.policy), copy.deepcopy(self.coverage))
+        expected = {
+            "npm-lock-security-remediation",
+            "npm-security-update",
+            "python-security-pin",
+            "container-digest-pin",
+        }
         self.assertEqual(
-            {"npm-security-update", "python-security-pin", "container-digest-pin"},
+            expected,
             {
                 fixer_id
                 for fixer_id, item in validated["fixers"].items()
-                if item["risk_class"] == "review-required"
-                and fixer_id in {
-                    "npm-security-update",
-                    "python-security-pin",
-                    "container-digest-pin",
-                }
+                if item["risk_class"] == "review-required" and fixer_id in expected
             },
         )
 
     def test_new_fixers_remain_review_required_in_automerge_evaluation(self) -> None:
         for fixer_id, path in (
+            ("npm-lock-security-remediation", "package-lock.json"),
             ("npm-security-update", "package.json"),
             ("python-security-pin", "requirements.txt"),
             ("container-digest-pin", "Dockerfile"),
@@ -79,15 +81,16 @@ class ExpandedAutomationTests(unittest.TestCase):
             )
 
     def test_new_fixer_cannot_gain_automatic_merge(self) -> None:
-        policy = copy.deepcopy(self.policy)
-        policy["fixers"]["npm-security-update"]["automatic_merge"] = True
-        with self.assertRaisesRegex(ContractError, "cannot automatically merge"):
-            validate_policy(policy, copy.deepcopy(self.coverage))
+        for fixer_id in ("npm-lock-security-remediation", "npm-security-update"):
+            policy = copy.deepcopy(self.policy)
+            policy["fixers"][fixer_id]["automatic_merge"] = True
+            with self.assertRaisesRegex(ContractError, "cannot automatically merge"):
+                validate_policy(policy, copy.deepcopy(self.coverage))
 
     def test_new_fixer_path_expansion_fails_closed(self) -> None:
         policy = copy.deepcopy(self.policy)
-        policy["fixers"]["python-security-pin"]["allowed_path_patterns"].append(
-            r"^pyproject\.toml$"
+        policy["fixers"]["npm-lock-security-remediation"]["allowed_path_patterns"].append(
+            r"^npm-shrinkwrap\.json$"
         )
         with self.assertRaisesRegex(ContractError, "path authority changed"):
             validate_policy(policy, copy.deepcopy(self.coverage))
