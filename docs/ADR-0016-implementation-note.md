@@ -1,6 +1,6 @@
 # ADR-0016 implementation note
 
-This branch implements accepted Atlas Infra authority `9ac88f38c2fa370d566421f0909db85b25a309ea` without expanding provider permissions, target repository coverage, workflow-dispatch authority, or native automatic merge.
+This branch implements accepted Atlas Infra authority `eb634e5b19725ecc87902543058a4dd2a2e089c7` without expanding provider permissions, target repository coverage, workflow-dispatch authority, or native automatic merge.
 
 The implementation adds the review-required `npm-lock-security-remediation` fixer. The fixer accepts only the structured candidate defined by ADR-0016, binds one matching `package.json` / lockfile-v3 `package-lock.json` pair, requires npm `10.9.3`, validates every direct and transitive preimage, validates exact parent constraints for transitive targets, disables lifecycle scripts, independently regenerates the graph, compares producer target digests, and reruns a bounded OSV check before a ChangePlan can be published.
 
