@@ -1,4 +1,4 @@
-"""Contract-aware proposal generation with ADR-0015 remediation input binding."""
+"""Contract-aware proposal generation with ADR-0016 remediation input binding."""
 from __future__ import annotations
 
 import copy
@@ -17,7 +17,12 @@ from atlas_gardener.safety import (
     ensure_remediation_allowed,
 )
 
-_NEW_FIXERS = {"npm-security-update", "python-security-pin", "container-digest-pin"}
+_NEW_FIXERS = {
+    "npm-lock-security-remediation",
+    "npm-security-update",
+    "python-security-pin",
+    "container-digest-pin",
+}
 _CORE_PROPOSE = _core.propose
 
 
@@ -48,9 +53,6 @@ def propose(
     return proposal, plan, evidence
 
 
-# scan() lives in the preserved core module and resolves its module-global
-# propose symbol at runtime. Bind it to the candidate-aware implementation only
-# after retaining the original implementation above.
 _core.propose = propose
 scan = _core.scan
 
