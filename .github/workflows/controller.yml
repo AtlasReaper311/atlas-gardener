@@ -23,7 +23,7 @@ jobs:
       ATLAS_GARDENER_MODE: ${{ vars.ATLAS_GARDENER_MODE || 'disabled' }}
       ATLAS_GARDENER_WRITE_GATE: ${{ vars.ATLAS_GARDENER_WRITE_GATE || 'disabled' }}
       ATLAS_GARDENER_WRITE_TARGETS_JSON: ${{ vars.ATLAS_GARDENER_WRITE_TARGETS_JSON || '[]' }}
-      AUTHORITY_SHA: 11e7a727590aa5376e766416b1e6a83fb6fd98ef
+      AUTHORITY_SHA: 9ac88f38c2fa370d566421f0909db85b25a309ea
       BUNDLE_PATH: ${{ github.workspace }}/controller-input/gardener-findings.json
       EVIDENCE_PATH: ${{ github.workspace }}/controller-evidence/controller.json
       WORK_ROOT: ${{ github.workspace }}/controller-work
@@ -35,7 +35,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.0, Node 24
         with:
           repository: AtlasReaper311/atlas-infra
-          ref: 11e7a727590aa5376e766416b1e6a83fb6fd98ef
+          ref: 9ac88f38c2fa370d566421f0909db85b25a309ea
           path: .atlas-infra
           persist-credentials: false
 
@@ -58,6 +58,7 @@ jobs:
             tests.test_controller \
             tests.test_expanded_automation \
             tests.test_github_app_auth \
+            tests.test_graph_fixers \
             tests.test_remediation_input \
             tests.test_security_fixers \
             tests.test_write_targets \
