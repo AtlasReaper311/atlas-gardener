@@ -58,6 +58,7 @@ class RepositoryBaselineTests(unittest.TestCase):
             "src/atlas_gardener/automatic_github.py",
             "src/atlas_gardener/github_app_auth.py",
             "src/atlas_gardener/_github_app_pr_core.py",
+            "src/atlas_gardener/graph_fixers.py",
             "src/atlas_gardener/notifications.py",
         }
         network_sources = {
@@ -85,6 +86,12 @@ class RepositoryBaselineTests(unittest.TestCase):
         self.assertIn("timeout=30", automatic)
         self.assertNotIn("/merge", automatic)
         self.assertNotIn("/actions/", automatic)
+
+        graph = sources["src/atlas_gardener/graph_fixers.py"]
+        self.assertIn('"https://api.osv.dev/v1/querybatch"', graph)
+        self.assertIn("timeout=90", graph)
+        self.assertIn('NPM_VERSION = "10.9.3"', graph)
+        self.assertNotIn("shell=True", graph)
 
         notifications = sources["src/atlas_gardener/notifications.py"]
         self.assertIn(
