@@ -16,7 +16,7 @@ from atlas_gardener.automatic_github import (
 from atlas_gardener.automation import approval_marker
 from atlas_gardener.contracts import sha256_value
 from atlas_gardener.errors import SafetyRefusal
-from atlas_gardener.github_app_pr import _plan_digest
+from atlas_gardener.github_app_pr import _plan_digest, _pr_body
 
 
 class FakeTransport:
@@ -253,6 +253,59 @@ class AutomaticGitHubTests(unittest.TestCase):
         )
         self.assertEqual(plan, selected)
         self.assertEqual(42, found["number"])
+
+    def test_existing_open_pr_with_renewed_expiry_is_idempotent(self) -> None:
+        plan = make_plan()
+        transport = FakeTransport(plan)
+        previous_plan = copy.deepcopy(plan)
+        previous_plan["expires_at"] = (
+            datetime.now(timezone.utc) + timedelta(days=2)
+        ).isoformat().replace("+00:00", "Z")
+        previous_plan["plan_digest"] = _plan_digest(previous_plan)
+        approval = make_approval(previous_plan, "3" * 40)
+        transport.pull_list = [
+            {
+                "number": 42,
+                "html_url": "https://github.com/AtlasReaper311/example/pull/42",
+                "body": _pr_body(previous_plan) + "\n\n" + approval_marker(approval),
+                "state": "open",
+                "merged_at": None,
+            }
+        ]
+
+        selected, found = resolve_publication_plan(
+            plan=plan,
+            remediation_key=approval["remediation_key"],
+            token="installation-token-that-is-long-enough",
+            transport=transport,
+        )
+
+        self.assertEqual(plan, selected)
+        self.assertEqual(42, found["number"])
+
+    def test_open_pr_with_substantive_plan_change_still_fails_closed(self) -> None:
+        plan = make_plan()
+        transport = FakeTransport(plan)
+        previous_plan = copy.deepcopy(plan)
+        previous_plan["validation_plan"][0]["expected"] = "different expectation"
+        previous_plan["plan_digest"] = _plan_digest(previous_plan)
+        approval = make_approval(previous_plan, "3" * 40)
+        transport.pull_list = [
+            {
+                "number": 42,
+                "body": _pr_body(previous_plan) + "\n\n" + approval_marker(approval),
+                "state": "open",
+                "merged_at": None,
+            }
+        ]
+
+        with self.assertRaisesRegex(SafetyRefusal, "conflicts with the current"):
+            resolve_publication_plan(
+                plan=plan,
+                remediation_key=approval["remediation_key"],
+                token="installation-token-that-is-long-enough",
+                transport=transport,
+            )
 
     def test_closed_obsolete_patch_selects_deterministic_replacement(self) -> None:
         plan = make_plan()
