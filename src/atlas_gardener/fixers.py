@@ -7,7 +7,7 @@ from typing import Any
 from atlas_gardener import _fixers_core as _core
 from atlas_gardener._fixers_core import *
 from atlas_gardener.errors import SafetyRefusal
-from atlas_gardener.graph_fixers import npm_graph_plan
+from atlas_gardener.graph_fixers_minimal import npm_graph_plan
 from atlas_gardener.security_fixers import (
     container_digest_plan,
     npm_security_plan,
