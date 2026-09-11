@@ -11,7 +11,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from atlas_gardener.automatic_github import find_existing, prepare_commit, publish_prepared
+from atlas_gardener.automatic_github import (
+    prepare_commit,
+    publish_prepared,
+    resolve_publication_plan,
+)
 from atlas_gardener.automation import (
     automatic_merge_eligible,
     build_approval,
@@ -379,17 +383,16 @@ def run_controller(
                     "evidence": proposal_evidence,
                 }
             )
-            evidence["plans"].append(
-                {
-                    "plan_digest": plan["plan_digest"],
-                    "remediation_key": key,
-                    "repository": repository,
-                    "base_sha": plan["base_sha"],
-                    "patch_digest": plan["patch_digest"],
-                    "automatic_merge_eligible": eligible,
-                    "eligibility_reason": eligibility_reason,
-                }
-            )
+            plan_record = {
+                "plan_digest": plan["plan_digest"],
+                "remediation_key": key,
+                "repository": repository,
+                "base_sha": plan["base_sha"],
+                "patch_digest": plan["patch_digest"],
+                "automatic_merge_eligible": eligible,
+                "eligibility_reason": eligibility_reason,
+            }
+            evidence["plans"].append(plan_record)
             if mode == "observe":
                 continue
 
@@ -411,10 +414,23 @@ def run_controller(
                     "revoked": False,
                 }
                 try:
-                    existing = find_existing(
+                    plan, existing = resolve_publication_plan(
                         plan=plan,
                         remediation_key=key,
                         token=token.value,
+                    )
+                    eligible, eligibility_reason = automatic_merge_eligible(
+                        _eligibility_plan(plan, change_plan),
+                        policy,
+                    )
+                    plan_record.update(
+                        {
+                            "plan_digest": plan["plan_digest"],
+                            "base_sha": plan["base_sha"],
+                            "patch_digest": plan["patch_digest"],
+                            "automatic_merge_eligible": eligible,
+                            "eligibility_reason": eligibility_reason,
+                        }
                     )
                     if existing is not None:
                         state = (
