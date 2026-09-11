@@ -84,13 +84,18 @@ def _parents(packages: dict[str, Any], child_path: str) -> list[dict[str, str]]:
     for parent_path, entry in packages.items():
         if not parent_path or not isinstance(parent_path, str) or not isinstance(entry, dict):
             continue
-        dependencies = entry.get("dependencies")
-        if not isinstance(dependencies, dict):
-            continue
-        for dependency, specifier in dependencies.items():
-            if _resolve_child(packages, parent_path, str(dependency)) == child_path:
-                result.append({"package_path": parent_path, "specifier": str(specifier)})
-    return sorted(result, key=lambda item: (item["package_path"], item["specifier"]))
+        for section in ("dependencies", "optionalDependencies"):
+            dependencies = entry.get(section)
+            if not isinstance(dependencies, dict):
+                continue
+            for dependency, specifier in dependencies.items():
+                if _resolve_child(packages, parent_path, str(dependency)) == child_path:
+                    result.append({"package_path": parent_path, "specifier": str(specifier)})
+    unique = {json.dumps(item, sort_keys=True): item for item in result}
+    return sorted(
+        unique.values(),
+        key=lambda item: (item["package_path"], item["specifier"]),
+    )
 
 
 def _spec_accepts(specifier: str, target: tuple[int, int, int]) -> bool:
@@ -109,7 +114,10 @@ def _spec_accepts(specifier: str, target: tuple[int, int, int]) -> bool:
                 return target >= lower and target[:2] == lower[:2]
             return target >= lower and target == lower
     tokens = specifier.split()
-    if len(tokens) in {1, 2} and all(re.fullmatch(r"(?:>=|>|<=|<)[0-9]+\.[0-9]+\.[0-9]+", token) for token in tokens):
+    if len(tokens) in {1, 2} and all(
+        re.fullmatch(r"(?:>=|>|<=|<)[0-9]+\.[0-9]+\.[0-9]+", token)
+        for token in tokens
+    ):
         for token in tokens:
             bound = _semver(token[2:] if token[:2] in {">=", "<="} else token[1:])
             if token.startswith(">=") and target < bound:
@@ -147,7 +155,12 @@ def _replace_spec(text: str, dependency: str, current_spec: str, target_spec: st
         raise SafetyRefusal("npm graph manifest declaration is not uniquely line-addressable")
     index, match = matches[0]
     assert match is not None
-    lines[index] = match.group("prefix") + target_spec + match.group("suffix") + (match.group("newline") or "")
+    lines[index] = (
+        match.group("prefix")
+        + target_spec
+        + match.group("suffix")
+        + (match.group("newline") or "")
+    )
     return "".join(lines)
 
 
@@ -166,15 +179,29 @@ def _npm_environment(home: Path) -> dict[str, str]:
 
 
 def _run_pinned_npm(root: Path, update_names: list[str]) -> None:
-    commands = [[
-        "npx", "--yes", f"npm@{NPM_VERSION}", "--", "install",
-        "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund",
-    ]]
+    prefix = ["npx", "--yes", "--package", f"npm@{NPM_VERSION}", "npm"]
+    commands = [
+        prefix
+        + [
+            "install",
+            "--package-lock-only",
+            "--ignore-scripts",
+            "--no-audit",
+            "--no-fund",
+        ]
+    ]
     if update_names:
-        commands.append([
-            "npx", "--yes", f"npm@{NPM_VERSION}", "--", "update", *sorted(set(update_names)),
-            "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund",
-        ])
+        commands.append(
+            prefix
+            + [
+                "update",
+                *sorted(set(update_names)),
+                "--package-lock-only",
+                "--ignore-scripts",
+                "--no-audit",
+                "--no-fund",
+            ]
+        )
     for command in commands:
         try:
             completed = subprocess.run(
@@ -187,7 +214,9 @@ def _run_pinned_npm(root: Path, update_names: list[str]) -> None:
                 env=_npm_environment(root),
             )
         except (FileNotFoundError, subprocess.TimeoutExpired) as error:
-            raise SafetyRefusal("pinned npm graph regeneration is unavailable or timed out") from error
+            raise SafetyRefusal(
+                "pinned npm graph regeneration is unavailable or timed out"
+            ) from error
         if completed.returncode != 0:
             raise SafetyRefusal("pinned npm graph regeneration failed")
 
@@ -197,6 +226,7 @@ def _lock_purls(lock: dict[str, Any]) -> list[str]:
     if not isinstance(packages, dict):
         raise SafetyRefusal("npm graph lockfile packages map is unavailable")
     from urllib.parse import quote
+
     values: list[str] = []
     for path, entry in packages.items():
         if not path or not isinstance(path, str) or not isinstance(entry, dict):
@@ -213,7 +243,10 @@ def _osv_batch(queries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         "https://api.osv.dev/v1/querybatch",
         data=json.dumps({"queries": queries}).encode("utf-8"),
         method="POST",
-        headers={"Content-Type": "application/json", "User-Agent": "atlas-gardener/adr0016"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "atlas-gardener/adr0016",
+        },
     )
     try:
         with urllib.request.urlopen(request, timeout=90) as response:
@@ -230,7 +263,9 @@ def _active_vulnerability_ids(lock: dict[str, Any]) -> set[str]:
     purls = _lock_purls(lock)
     found: set[str] = set()
     for offset in range(0, len(purls), 500):
-        base_queries = [{"package": {"purl": purl}} for purl in purls[offset: offset + 500]]
+        base_queries = [
+            {"package": {"purl": purl}} for purl in purls[offset : offset + 500]
+        ]
         pending = list(enumerate(base_queries))
         tokens: dict[int, str] = {}
         while pending:
@@ -244,10 +279,12 @@ def _active_vulnerability_ids(lock: dict[str, Any]) -> set[str]:
                 indexes.append(index)
             page = _osv_batch(queries)
             pending = []
-            for index, query, result in zip(indexes, queries, page, strict=True):
+            for index, result in zip(indexes, page, strict=True):
                 vulns = result.get("vulns", []) if isinstance(result, dict) else []
                 if not isinstance(vulns, list):
-                    raise SafetyRefusal("bounded OSV vulnerability collection is malformed")
+                    raise SafetyRefusal(
+                        "bounded OSV vulnerability collection is malformed"
+                    )
                 for item in vulns:
                     if isinstance(item, dict) and isinstance(item.get("id"), str):
                         found.add(item["id"])
@@ -255,23 +292,38 @@ def _active_vulnerability_ids(lock: dict[str, Any]) -> set[str]:
                 if token:
                     marker = str(token)
                     if tokens.get(index) == marker:
-                        raise SafetyRefusal("bounded OSV pagination repeated a token")
+                        raise SafetyRefusal(
+                            "bounded OSV pagination repeated a token"
+                        )
                     tokens[index] = marker
                     pending.append((index, base_queries[index]))
     return found
 
 
 def npm_graph_plan(repository: Path, candidate: dict[str, Any] | None) -> ChangePlan:
-    if not isinstance(candidate, dict) or candidate.get("kind") != "npm-lock-security-remediation":
-        raise SafetyRefusal("npm graph fixer requires matching structured remediation input")
+    if (
+        not isinstance(candidate, dict)
+        or candidate.get("kind") != "npm-lock-security-remediation"
+    ):
+        raise SafetyRefusal(
+            "npm graph fixer requires matching structured remediation input"
+        )
     if candidate.get("npm_version") != NPM_VERSION:
-        raise SafetyRefusal("npm graph candidate toolchain version is not the accepted pin")
+        raise SafetyRefusal(
+            "npm graph candidate toolchain version is not the accepted pin"
+        )
     manifest_relative = str(candidate.get("manifest_file") or "")
     lock_relative = str(candidate.get("lockfile_file") or "")
     manifest_path = Path(manifest_relative)
     lock_path = Path(lock_relative)
-    if manifest_path.name != "package.json" or lock_path.name != "package-lock.json" or manifest_path.parent != lock_path.parent:
-        raise SafetyRefusal("npm graph candidate must bind one matching manifest/lock pair")
+    if (
+        manifest_path.name != "package.json"
+        or lock_path.name != "package-lock.json"
+        or manifest_path.parent != lock_path.parent
+    ):
+        raise SafetyRefusal(
+            "npm graph candidate must bind one matching manifest/lock pair"
+        )
 
     _, manifest_before, manifest_text = read_text_file(repository, manifest_relative)
     _, lock_before, _ = read_text_file(repository, lock_relative)
@@ -286,7 +338,11 @@ def npm_graph_plan(repository: Path, candidate: dict[str, Any] | None) -> Change
     direct_updates = candidate.get("direct_updates")
     transitive_updates = candidate.get("transitive_updates")
     vulnerability_ids = candidate.get("vulnerability_ids")
-    if not isinstance(direct_updates, list) or not isinstance(transitive_updates, list) or not (direct_updates or transitive_updates):
+    if (
+        not isinstance(direct_updates, list)
+        or not isinstance(transitive_updates, list)
+        or not (direct_updates or transitive_updates)
+    ):
         raise SafetyRefusal("npm graph candidate has no bounded operation")
     if not isinstance(vulnerability_ids, list) or not vulnerability_ids:
         raise SafetyRefusal("npm graph candidate has no vulnerability postcondition")
@@ -299,10 +355,15 @@ def npm_graph_plan(repository: Path, candidate: dict[str, Any] | None) -> Change
             raise SafetyRefusal("npm graph direct operation is malformed")
         dependency = str(operation.get("dependency") or "")
         if not dependency or dependency in seen_direct:
-            raise SafetyRefusal("npm graph direct operation identity is absent or duplicated")
+            raise SafetyRefusal(
+                "npm graph direct operation identity is absent or duplicated"
+            )
         seen_direct.add(dependency)
         declaration = _declaration(package, dependency)
-        expected = (str(operation.get("section") or ""), str(operation.get("current_spec") or ""))
+        expected = (
+            str(operation.get("section") or ""),
+            str(operation.get("current_spec") or ""),
+        )
         if declaration != expected:
             raise SafetyRefusal("npm graph direct declaration preimage mismatch")
         current = _semver(operation.get("current_version"))
@@ -310,14 +371,24 @@ def npm_graph_plan(repository: Path, candidate: dict[str, Any] | None) -> Change
         if target <= current or target[0] != current[0]:
             raise SafetyRefusal("npm graph direct target is not newer same-major")
         entry = packages.get(f"node_modules/{dependency}")
-        if not isinstance(entry, dict) or str(entry.get("version") or "") != operation.get("current_version"):
+        if (
+            not isinstance(entry, dict)
+            or str(entry.get("version") or "") != operation.get("current_version")
+        ):
             raise SafetyRefusal("npm graph direct lock preimage mismatch")
         current_spec = str(operation.get("current_spec") or "")
         target_spec = str(operation.get("target_spec") or "")
-        if _SUPPORTED_SPEC_RE.fullmatch(current_spec) is None or _SUPPORTED_SPEC_RE.fullmatch(target_spec) is None:
-            raise SafetyRefusal("npm graph direct version specification is unsupported")
+        if (
+            _SUPPORTED_SPEC_RE.fullmatch(current_spec) is None
+            or _SUPPORTED_SPEC_RE.fullmatch(target_spec) is None
+        ):
+            raise SafetyRefusal(
+                "npm graph direct version specification is unsupported"
+            )
         if current_spec != target_spec:
-            manifest_after_text = _replace_spec(manifest_after_text, dependency, current_spec, target_spec)
+            manifest_after_text = _replace_spec(
+                manifest_after_text, dependency, current_spec, target_spec
+            )
         update_names.add(dependency)
 
     seen_transitive: set[str] = set()
@@ -326,11 +397,17 @@ def npm_graph_plan(repository: Path, candidate: dict[str, Any] | None) -> Change
             raise SafetyRefusal("npm graph transitive operation is malformed")
         package_path = str(operation.get("package_path") or "")
         if not package_path or package_path in seen_transitive:
-            raise SafetyRefusal("npm graph transitive operation path is absent or duplicated")
+            raise SafetyRefusal(
+                "npm graph transitive operation path is absent or duplicated"
+            )
         seen_transitive.add(package_path)
         dependency = str(operation.get("dependency") or "")
         entry = packages.get(package_path)
-        if not isinstance(entry, dict) or _package_name(package_path, entry) != dependency or str(entry.get("version") or "") != operation.get("current_version"):
+        if (
+            not isinstance(entry, dict)
+            or _package_name(package_path, entry) != dependency
+            or str(entry.get("version") or "") != operation.get("current_version")
+        ):
             raise SafetyRefusal("npm graph transitive lock preimage mismatch")
         current = _semver(operation.get("current_version"))
         target = _semver(operation.get("target_version"))
@@ -338,9 +415,15 @@ def npm_graph_plan(repository: Path, candidate: dict[str, Any] | None) -> Change
             raise SafetyRefusal("npm graph transitive target is not newer same-major")
         expected_parents = _parents(packages, package_path)
         if operation.get("parents") != expected_parents or not expected_parents:
-            raise SafetyRefusal("npm graph parent constraint evidence mismatches exact lock graph")
-        if not all(_spec_accepts(item["specifier"], target) for item in expected_parents):
-            raise SafetyRefusal("npm graph transitive target violates a parent constraint")
+            raise SafetyRefusal(
+                "npm graph parent constraint evidence mismatches exact lock graph"
+            )
+        if not all(
+            _spec_accepts(item["specifier"], target) for item in expected_parents
+        ):
+            raise SafetyRefusal(
+                "npm graph transitive target violates a parent constraint"
+            )
         update_names.add(dependency)
 
     manifest_after_expected = manifest_after_text.encode("utf-8")
@@ -353,20 +436,35 @@ def npm_graph_plan(repository: Path, candidate: dict[str, Any] | None) -> Change
         lock_after = (root / "package-lock.json").read_bytes()
         if manifest_after != manifest_after_expected:
             raise SafetyRefusal("pinned npm unexpectedly rewrote package.json")
-        if _sha256(manifest_after) != candidate.get("target_manifest_sha256") or _sha256(lock_after) != candidate.get("target_lockfile_sha256"):
-            raise SafetyRefusal("npm graph regeneration disagrees with producer target digests")
+        if (
+            _sha256(manifest_after) != candidate.get("target_manifest_sha256")
+            or _sha256(lock_after) != candidate.get("target_lockfile_sha256")
+        ):
+            raise SafetyRefusal(
+                "npm graph regeneration disagrees with producer target digests"
+            )
         generated_lock = _read_json_bytes(lock_after, "generated package-lock.json")
         generated_packages = generated_lock.get("packages")
-        if generated_lock.get("lockfileVersion") != 3 or not isinstance(generated_packages, dict):
+        if generated_lock.get("lockfileVersion") != 3 or not isinstance(
+            generated_packages, dict
+        ):
             raise SafetyRefusal("pinned npm generated an unsupported lockfile")
         for operation in direct_updates:
             entry = generated_packages.get(f"node_modules/{operation['dependency']}")
-            if not isinstance(entry, dict) or str(entry.get("version") or "") != operation["target_version"]:
+            if (
+                not isinstance(entry, dict)
+                or str(entry.get("version") or "") != operation["target_version"]
+            ):
                 raise SafetyRefusal("npm graph direct target postcondition failed")
         for operation in transitive_updates:
             entry = generated_packages.get(operation["package_path"])
-            if not isinstance(entry, dict) or str(entry.get("version") or "") != operation["target_version"]:
-                raise SafetyRefusal("npm graph transitive target postcondition failed")
+            if (
+                not isinstance(entry, dict)
+                or str(entry.get("version") or "") != operation["target_version"]
+            ):
+                raise SafetyRefusal(
+                    "npm graph transitive target postcondition failed"
+                )
         active = _active_vulnerability_ids(generated_lock)
         remaining = sorted(set(str(value) for value in vulnerability_ids) & active)
         if remaining:
